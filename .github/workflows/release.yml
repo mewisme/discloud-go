@@ -61,5 +61,13 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=discloud-web
-          cache-to: type=gha,mode=max,scope=discloud-web
+          # GHA cache is fast on the same runner pool; registry cache survives
+          # across jobs/repos and works better for multi-arch (amd64+arm64).
+          cache-from: |
+            type=gha,scope=discloud-web
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache
+          cache-to: |
+            type=gha,mode=max,scope=discloud-web
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache,mode=max
+          build-args: |
+            API_URL=http://api:8080

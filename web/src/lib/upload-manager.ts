@@ -241,6 +241,13 @@ function syncFromPeers(): void {
   }
   window.addEventListener("storage", onStorage);
 
+  window.addEventListener("beforeunload", (e) => {
+    if (running || jobs.length > 0) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+
   window.addEventListener("pagehide", () => {
     if (ownerId === ensureTabId() && (uploading || jobs.length > 0)) {
       jobs = [];
@@ -320,10 +327,6 @@ export function subscribe(listener: Listener): () => void {
   return () => {
     listeners.delete(listener);
   };
-}
-
-export function isUploadOwner(): boolean {
-  return running && ownerId === ensureTabId();
 }
 
 /** Enqueue one or more files. Safe to call while uploads are running. */

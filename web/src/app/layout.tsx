@@ -7,7 +7,6 @@ import { Toaster } from "sonner";
 import { HealthBanner } from "@/components/health-banner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { UploadStatus } from "@/components/upload-status";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +64,6 @@ export default function RootLayout({
               </div>
             </div>
           </header>
-          <UploadStatus />
           <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10">
             {children}
           </main>

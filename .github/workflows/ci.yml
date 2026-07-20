@@ -57,3 +57,4 @@ jobs:
         with:
           context: web
           push: false
+          cache-from: type=gha,scope=discloud-web
