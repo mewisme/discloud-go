@@ -1,0 +1,61 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://discloud:${POSTGRES_PASSWORD:-discloud}@postgres:5432/discloud
+      VALKEY_URL: valkey://valkey:6379
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set in .env}
+      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:?set in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: web
+      args:
+        API_URL: http://api:8080
+    environment:
+      API_URL: http://api:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: discloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-discloud}
+      POSTGRES_DB: discloud
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U discloud -d discloud"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    volumes:
+      - valkeydata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  valkeydata:

@@ -1,0 +1,291 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"math/rand"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/mewisme/discloud-go/internal/discord"
+	"github.com/mewisme/discloud-go/internal/store"
+)
+
+// fakeDiscord emulates the two Discord API endpoints the app uses plus the
+// CDN, all in one httptest server.
+type fakeDiscord struct {
+	mu       sync.Mutex
+	messages map[string][]byte // message id -> chunk bytes
+	nextID   int
+	baseURL  string
+	uploads  int
+}
+
+func newFakeDiscord(t *testing.T) (*fakeDiscord, *httptest.Server) {
+	f := &fakeDiscord{messages: map[string][]byte{}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /channels/{ch}/messages", func(w http.ResponseWriter, r *http.Request) {
+		file, _, err := r.FormFile("files[0]")
+		if err != nil {
+			t.Errorf("fake discord: bad multipart: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		data, _ := io.ReadAll(file)
+		f.mu.Lock()
+		f.nextID++
+		id := strconv.Itoa(f.nextID)
+		f.messages[id] = data
+		f.uploads++
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(f.messageJSON(id))
+	})
+	mux.HandleFunc("GET /channels/{ch}/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		f.mu.Lock()
+		_, ok := f.messages[id]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "unknown message", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(f.messageJSON(id))
+	})
+	mux.HandleFunc("GET /attachments/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		data, ok := f.messages[r.PathValue("id")]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "gone", http.StatusNotFound)
+			return
+		}
+		http.ServeContent(w, r, "chunk", time.Time{}, bytes.NewReader(data))
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	f.baseURL = ts.URL
+	return f, ts
+}
+
+func (f *fakeDiscord) messageJSON(id string) map[string]any {
+	ex := strconv.FormatInt(time.Now().Add(24*time.Hour).Unix(), 16)
+	return map[string]any{
+		"id": id,
+		"attachments": []map[string]string{
+			{"url": fmt.Sprintf("%s/attachments/%s?ex=%s", f.baseURL, id, ex)},
+		},
+	}
+}
+
+type memStore struct {
+	mu    sync.Mutex
+	files map[string]store.File
+}
+
+func (m *memStore) CreateFile(_ context.Context, f store.File) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.files[f.ID] = f
+	return nil
+}
+
+func (m *memStore) GetFile(_ context.Context, id string) (store.File, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.files[id]
+	if !ok {
+		return store.File{}, store.ErrNotFound
+	}
+	return f, nil
+}
+
+func (m *memStore) ListFiles(_ context.Context, limit int) ([]store.File, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	files := make([]store.File, 0, len(m.files))
+	for _, f := range m.files {
+		files = append(files, f)
+	}
+	if len(files) > limit {
+		files = files[:limit]
+	}
+	return files, nil
+}
+
+func (m *memStore) Ping(context.Context) error { return nil }
+
+type memCache struct {
+	mu   sync.Mutex
+	urls map[string]string
+	hits int
+}
+
+func (c *memCache) GetURL(_ context.Context, id string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, ok := c.urls[id]
+	if ok {
+		c.hits++
+	}
+	return u, ok
+}
+
+func (c *memCache) SetURL(_ context.Context, id, u string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.urls[id] = u
+}
+
+func (c *memCache) Ping(context.Context) error { return nil }
+
+func newTestServer(t *testing.T) (*httptest.Server, *fakeDiscord, *memCache) {
+	fake, discordTS := newFakeDiscord(t)
+	dc := discord.New("test-token", "test-channel")
+	dc.BaseURL = discordTS.URL
+	ca := &memCache{urls: map[string]string{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(log, &memStore{files: map[string]store.File{}}, ca, dc, "")
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, fake, ca
+}
+
+func TestUploadDownloadRoundTrip(t *testing.T) {
+	ts, fake, ca := newTestServer(t)
+
+	// 20 MB + change: exercises full chunks plus a short tail chunk.
+	payload := make([]byte, 20<<20+12345)
+	rand.New(rand.NewSource(42)).Read(payload)
+
+	resp, err := http.Post(ts.URL+"/api/upload?fileName="+url.QueryEscape("Round Trip!.bin"), "application/octet-stream", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("upload status = %d: %s", resp.StatusCode, body)
+	}
+	var up struct {
+		FileID   string `json:"fileId"`
+		FileName string `json:"fileName"`
+		FileSize int64  `json:"fileSize"`
+		URL      string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		t.Fatal(err)
+	}
+	if up.FileSize != int64(len(payload)) {
+		t.Errorf("fileSize = %d, want %d", up.FileSize, len(payload))
+	}
+	if up.FileName != "round-trip.bin" {
+		t.Errorf("fileName = %q, want %q", up.FileName, "round-trip.bin")
+	}
+	if fake.uploads != 3 {
+		t.Errorf("discord uploads = %d, want 3", fake.uploads)
+	}
+
+	// Full download must be byte-identical.
+	dl, err := http.Get(ts.URL + "/f/" + up.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dl.Body.Close()
+	got, err := io.ReadAll(dl.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dl.StatusCode != http.StatusOK {
+		t.Fatalf("download status = %d", dl.StatusCode)
+	}
+	if sha256.Sum256(got) != sha256.Sum256(payload) {
+		t.Fatalf("downloaded bytes differ from upload (%d vs %d bytes)", len(got), len(payload))
+	}
+
+	// Range download crossing the 8 MB chunk boundary.
+	start, end := int64(8<<20-100), int64(8<<20+100)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/f/"+up.FileID, nil)
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	pr, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Body.Close()
+	if pr.StatusCode != http.StatusPartialContent {
+		t.Fatalf("range status = %d, want 206", pr.StatusCode)
+	}
+	wantCR := fmt.Sprintf("bytes %d-%d/%d", start, end, len(payload))
+	if cr := pr.Header.Get("Content-Range"); cr != wantCR {
+		t.Errorf("Content-Range = %q, want %q", cr, wantCR)
+	}
+	part, _ := io.ReadAll(pr.Body)
+	if !bytes.Equal(part, payload[start:end+1]) {
+		t.Fatal("range bytes differ from source slice")
+	}
+
+	// Second download should hit the URL cache instead of the Discord API.
+	if ca.hits == 0 {
+		t.Error("expected cache hits on second download, got none")
+	}
+
+	// File list includes the upload.
+	lr, err := http.Get(ts.URL + "/api/files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lr.Body.Close()
+	var list struct {
+		Files []store.File `json:"files"`
+	}
+	if err := json.NewDecoder(lr.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Files) != 1 || list.Files[0].ID != up.FileID {
+		t.Errorf("list = %+v, want the uploaded file", list.Files)
+	}
+}
+
+func TestUploadValidation(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+
+	resp, err := http.Post(ts.URL+"/api/upload", "application/octet-stream", strings.NewReader("data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("missing fileName: status = %d, want 400", resp.StatusCode)
+	}
+
+	resp, err = http.Post(ts.URL+"/api/upload?fileName=x.txt", "application/octet-stream", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty body: status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestDownloadNotFound(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	resp, err := http.Get(ts.URL + "/f/does-not-exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
