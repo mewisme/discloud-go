@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudUpload, FileIcon, RotateCcw, X } from "lucide-react";
+import { CloudUpload, FileIcon, Loader2, RotateCcw, X } from "lucide-react";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 
 import { CopyButton } from "@/components/copy-button";
@@ -45,6 +45,7 @@ export function Uploader() {
   const busy = Boolean(state.uploading) || state.queue.length > 0;
   const showResult =
     state.lastResult && !state.uploading && state.queue.length === 0;
+  const processing = state.uploading?.phase === "processing";
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -114,14 +115,36 @@ export function Uploader() {
                 <X aria-hidden />
               </Button>
             )}
-            <Progress value={state.uploading.percent} className="gap-2">
-              <ProgressLabel className="truncate">
-                Uploading {state.uploading.fileName}
-              </ProgressLabel>
-              <ProgressValue />
-            </Progress>
+            {processing ? (
+              <div className="flex flex-col gap-2" role="status" aria-live="polite">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Loader2
+                    className="size-4 shrink-0 animate-spin text-primary"
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    Processing {state.uploading.fileName}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground tabular-nums">
+                    Finalizing…
+                  </span>
+                </div>
+                <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="absolute inset-y-0 w-2/5 rounded-full bg-primary animate-upload-indeterminate" />
+                </div>
+              </div>
+            ) : (
+              <Progress value={state.uploading.percent} className="gap-2">
+                <ProgressLabel className="truncate">
+                  Uploading {state.uploading.fileName}
+                </ProgressLabel>
+                <ProgressValue />
+              </Progress>
+            )}
             <p className="text-xs text-muted-foreground">
-              Continues in the background across routes and other open tabs.
+              {processing
+                ? "Assembling chunks on the server…"
+                : "Continues in the background across routes and other open tabs."}
             </p>
           </CardContent>
         </Card>

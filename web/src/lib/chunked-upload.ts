@@ -31,6 +31,8 @@ export async function uploadFileChunked(
   file: File,
   onProgress: (loaded: number, total: number) => void,
   signal?: AbortSignal,
+  /** Fires after all chunks are up, while the server assembles the file. */
+  onProcessing?: () => void,
 ): Promise<UploadResult> {
   if (file.size === 0) throw new Error("File is empty");
   if (!crypto.subtle) {
@@ -66,6 +68,7 @@ export async function uploadFileChunked(
   await Promise.all(Array.from({ length: workers }, worker));
 
   throwIfAborted(signal);
+  onProcessing?.();
   const res = await fetch(apiURL("/api/upload/complete"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

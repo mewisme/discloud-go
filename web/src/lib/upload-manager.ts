@@ -6,9 +6,17 @@ import { rememberLocalFile } from "@/lib/local-files";
 
 export type QueuedItem = { id: string; name: string; size: number };
 
+export type UploadPhase = "uploading" | "processing";
+
+export type ActiveUpload = {
+  fileName: string;
+  percent: number;
+  phase: UploadPhase;
+};
+
 export type UploadManagerState = {
   /** Active upload (this tab or mirrored from another). */
-  uploading: { fileName: string; percent: number } | null;
+  uploading: ActiveUpload | null;
   /** True when this tab owns the in-flight upload (can cancel). */
   canCancel: boolean;
   /** Files waiting in this tab (File blobs are tab-local). */
@@ -29,10 +37,21 @@ const STALE_MS = 15_000;
 type WireState = {
   ownerId: string | null;
   updatedAt: number;
-  uploading: { fileName: string; percent: number } | null;
+  uploading: ActiveUpload | null;
   queue: number;
   lastResult: UploadResult | null;
 };
+
+function normalizeActive(
+  u: ActiveUpload | { fileName: string; percent: number } | null,
+): ActiveUpload | null {
+  if (!u) return null;
+  return {
+    fileName: u.fileName,
+    percent: u.percent,
+    phase: "phase" in u && u.phase === "processing" ? "processing" : "uploading",
+  };
+}
 
 let uploading: UploadManagerState["uploading"] = null;
 let lastResult: UploadResult | null = null;
@@ -190,7 +209,7 @@ function applyRemote(wire: WireState): void {
   if (wire.ownerId === ensureTabId() && running) return;
 
   const wasDone = lastResult?.fileId;
-  uploading = wire.uploading;
+  uploading = normalizeActive(wire.uploading);
   ownerId = wire.ownerId;
   remoteQueue = wire.queue ?? 0;
   if (wire.lastResult) lastResult = wire.lastResult;
@@ -231,7 +250,7 @@ function syncFromPeers(): void {
 
   const stored = readStored();
   if (stored) {
-    uploading = stored.uploading;
+    uploading = normalizeActive(stored.uploading);
     ownerId = stored.ownerId;
     remoteQueue = stored.queue ?? 0;
     if (stored.lastResult) lastResult = stored.lastResult;
@@ -291,7 +310,7 @@ async function pump(): Promise<void> {
   abortCtrl = new AbortController();
   const id = ensureTabId();
   ownerId = id;
-  uploading = { fileName: next.file.name, percent: 0 };
+  uploading = { fileName: next.file.name, percent: 0, phase: "uploading" };
   publish();
 
   try {
@@ -301,14 +320,27 @@ async function pump(): Promise<void> {
         const percent = Math.round((sent / total) * 100);
         if (
           percent === lastPublishedPercent &&
-          uploading?.fileName === next.file.name
+          uploading?.fileName === next.file.name &&
+          uploading.phase === "uploading"
         ) {
           return;
         }
-        uploading = { fileName: next.file.name, percent };
+        uploading = {
+          fileName: next.file.name,
+          percent,
+          phase: "uploading",
+        };
         publish();
       },
       abortCtrl.signal,
+      () => {
+        uploading = {
+          fileName: next.file.name,
+          percent: 100,
+          phase: "processing",
+        };
+        publish();
+      },
     );
     rememberLocalFile(result);
     window.dispatchEvent(new Event("discloud:files"));
