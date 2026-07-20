@@ -152,6 +152,17 @@ func (m *memStore) GetChunks(_ context.Context, hashes []string) (map[string]sto
 	return out, nil
 }
 
+func (m *memStore) DeleteChunksByMessageID(_ context.Context, messageID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for h, c := range m.chunks {
+		if c.MessageID == messageID {
+			delete(m.chunks, h)
+		}
+	}
+	return nil
+}
+
 func (m *memStore) Ping(context.Context) error { return nil }
 
 type memCache struct {

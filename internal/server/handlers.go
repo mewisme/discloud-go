@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -153,13 +154,27 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusPartialContent
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", full.start, full.end, f.Size))
 	}
+
+	spans := partsForRange(f.ChunkSize, full)
+	if len(spans) == 0 || spans[0].idx >= len(f.MessageIDs) {
+		http.Error(w, "File has no readable chunks", http.StatusInternalServerError)
+		return
+	}
+	// Resolve the first part before committing headers so a dead Discord
+	// attachment becomes a real error instead of a truncated 200 body.
+	if _, err := s.resolveCDNURL(r.Context(), f.MessageIDs[spans[0].idx]); err != nil {
+		s.log.Error("stream part failed", "file", f.Name, "part", spans[0].idx, "error", err)
+		http.Error(w, "Chunk unavailable; re-upload the file", http.StatusBadGateway)
+		return
+	}
+
 	w.Header().Set("Content-Length", strconv.FormatInt(full.end-full.start+1, 10))
 	w.WriteHeader(status)
 	if r.Method == http.MethodHead {
 		return
 	}
 
-	for _, span := range partsForRange(f.ChunkSize, full) {
+	for _, span := range spans {
 		if span.idx >= len(f.MessageIDs) {
 			break // metadata/size mismatch; stop rather than 500 mid-stream
 		}
@@ -171,21 +186,36 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// resolveCDNURL returns a signed Discord CDN URL for ref, caching hits.
+// When Discord no longer has the attachment, the content-addressed chunk row
+// is dropped so the next upload re-POSTs those bytes.
+func (s *Server) resolveCDNURL(ctx context.Context, ref string) (string, error) {
+	cdnURL, ok := s.cache.GetURL(ctx, ref)
+	if ok {
+		return cdnURL, nil
+	}
+	cdnURL, err := s.discord.AttachmentURL(ctx, ref)
+	if err != nil {
+		if delErr := s.store.DeleteChunksByMessageID(ctx, ref); delErr != nil {
+			s.log.Error("purge dead chunk failed", "message", ref, "error", delErr)
+		} else {
+			s.log.Info("purged dead chunk refs", "message", ref)
+		}
+		return "", err
+	}
+	s.cache.SetURL(ctx, ref, cdnURL)
+	return cdnURL, nil
+}
+
 // streamPart resolves the chunk's signed CDN URL (cache first) and copies the
 // requested byte span to the client.
 func (s *Server) streamPart(w http.ResponseWriter, r *http.Request, messageID string, span partSpan) error {
-	ctx := r.Context()
-	cdnURL, ok := s.cache.GetURL(ctx, messageID)
-	if !ok {
-		var err error
-		cdnURL, err = s.discord.AttachmentURL(ctx, messageID)
-		if err != nil {
-			return err
-		}
-		s.cache.SetURL(ctx, messageID, cdnURL)
+	cdnURL, err := s.resolveCDNURL(r.Context(), messageID)
+	if err != nil {
+		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cdnURL, nil)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, cdnURL, nil)
 	if err != nil {
 		return err
 	}

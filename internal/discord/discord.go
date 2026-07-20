@@ -106,8 +106,8 @@ func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) 
 }
 
 // AttachmentURL fetches the message and returns its first attachment URL,
-// which Discord re-signs with a fresh expiry on every read. Any configured
-// bot that can see the channel may perform the read.
+// which Discord re-signs with a fresh expiry on every read. One message holds
+// one attachment; any configured bot that can see the channel may perform the read.
 func (c *Client) AttachmentURL(ctx context.Context, messageID string) (string, error) {
 	if len(c.bots) == 0 {
 		return "", fmt.Errorf("discord: no bot tokens configured")

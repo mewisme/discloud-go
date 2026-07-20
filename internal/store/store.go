@@ -155,6 +155,15 @@ func (s *Store) PutChunk(ctx context.Context, c Chunk) error {
 	return err
 }
 
+// DeleteChunksByMessageID drops content-addressed rows pointing at a Discord
+// message. Used when Discord no longer has the attachment so the next upload
+// re-POSTs bytes instead of reusing a dead ref.
+func (s *Store) DeleteChunksByMessageID(ctx context.Context, messageID string) error {
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM chunk_store WHERE message_id = $1`, messageID)
+	return err
+}
+
 // GetChunks resolves hashes to stored chunks; missing hashes are absent from
 // the returned map.
 func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chunk, error) {

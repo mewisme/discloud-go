@@ -20,6 +20,7 @@ type Store interface {
 	HasChunk(ctx context.Context, hash string) (bool, error)
 	PutChunk(ctx context.Context, c store.Chunk) error
 	GetChunks(ctx context.Context, hashes []string) (map[string]store.Chunk, error)
+	DeleteChunksByMessageID(ctx context.Context, messageID string) error
 	Ping(ctx context.Context) error
 }
 
