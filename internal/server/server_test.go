@@ -179,8 +179,13 @@ func (c *memCache) SetURL(_ context.Context, id, u string) {
 func (c *memCache) Ping(context.Context) error { return nil }
 
 func newTestServer(t *testing.T) (*httptest.Server, *fakeDiscord, *memCache) {
+	return newTestServerWithTokens(t, "test-token")
+}
+
+func newTestServerWithTokens(t *testing.T, tokens string) (*httptest.Server, *fakeDiscord, *memCache) {
+	t.Helper()
 	fake, discordTS := newFakeDiscord(t)
-	dc := discord.New("test-token", "test-channel")
+	dc := discord.New(tokens, "test-channel")
 	dc.BaseURL = discordTS.URL
 	ca := &memCache{urls: map[string]string{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -188,6 +193,42 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeDiscord, *memCache) {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fake, ca
+}
+
+func TestInfoWorkersScaleWithBots(t *testing.T) {
+	ts1, _, _ := newTestServerWithTokens(t, "tok-a")
+	resp, err := http.Get(ts1.URL + "/api/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var one struct {
+		Bots    int `json:"bots"`
+		Workers int `json:"workers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&one); err != nil {
+		t.Fatal(err)
+	}
+	if one.Bots != 1 || one.Workers != singleBotUploadConcurrency {
+		t.Fatalf("single bot info = %+v, want bots=1 workers=%d", one, singleBotUploadConcurrency)
+	}
+
+	ts3, _, _ := newTestServerWithTokens(t, "tok-a,tok-b,tok-c")
+	resp3, err := http.Get(ts3.URL + "/api/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp3.Body.Close()
+	var three struct {
+		Bots    int `json:"bots"`
+		Workers int `json:"workers"`
+	}
+	if err := json.NewDecoder(resp3.Body).Decode(&three); err != nil {
+		t.Fatal(err)
+	}
+	if three.Bots != 3 || three.Workers != 3 {
+		t.Fatalf("multi bot info = %+v, want bots=3 workers=3", three)
+	}
 }
 
 func TestUploadDownloadRoundTrip(t *testing.T) {

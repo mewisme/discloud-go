@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload/complete", s.handleUploadComplete)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/{id}", s.handleGetFile)
+	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /f/{id}", s.handleDownload)
 	mux.HandleFunc("GET /f/{id}/{name...}", s.handleDownload)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +84,21 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ready"))
+}
+
+// handleInfo is a tiny public config the web client uses to size upload
+// parallelism (one worker per Discord bot when multiple tokens are set).
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	bots := s.discord.TokenCount()
+	workers := singleBotUploadConcurrency
+	if bots > 1 {
+		workers = bots
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"bots":      bots,
+		"chunkSize": chunkSize,
+		"workers":   workers,
+	})
 }
 
 type statusRecorder struct {

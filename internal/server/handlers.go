@@ -25,11 +25,22 @@ const (
 	// rangeWindow caps open-ended Range requests, mirroring the original's
 	// 5 MB windows for media seeking.
 	rangeWindow = 5 << 20
-	// uploadConcurrency bounds parallel Discord uploads (and thus buffered
-	// chunks in memory: (uploadConcurrency+1) * chunkSize per request).
-	uploadConcurrency = 3
-	listLimit         = 50
+	// singleBotUploadConcurrency is the in-flight Discord POST limit when only
+	// one bot token is configured (pipeline a few chunks despite one rate clock).
+	singleBotUploadConcurrency = 3
+	listLimit                  = 50
 )
+
+// discordUploadLimit is how many Discord attachment uploads may run at once.
+// With multiple bot tokens, match the token count so each bot can work in
+// parallel; with one token, keep a small pipeline.
+func (s *Server) discordUploadLimit() int {
+	n := s.discord.TokenCount()
+	if n <= 1 {
+		return singleBotUploadConcurrency
+	}
+	return n
+}
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	rawName := r.URL.Query().Get("fileName")
@@ -45,7 +56,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		messageIDs []string
 	)
 	g, ctx := errgroup.WithContext(r.Context())
-	g.SetLimit(uploadConcurrency)
+	g.SetLimit(s.discordUploadLimit())
 
 	fileSize, err := forEachChunk(r.Body, chunkSize, func(idx int, data []byte) error {
 		if ctx.Err() != nil { // an upload already failed; stop reading

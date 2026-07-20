@@ -5,10 +5,30 @@ import type { UploadResult } from "@/lib/api";
  * proxied requests at 100 MB): the file is split into 8 MB chunks matching
  * the server's storage chunk size, each chunk is SHA-256 hashed and skipped
  * if the server already has it, so retried uploads resume where they left off.
+ *
+ * Worker count comes from GET /api/info (matches Discord bot token count when
+ * multiple tokens are configured).
  */
 const CHUNK_SIZE = 8 * 1024 * 1024;
-const CONCURRENCY = 3;
+const DEFAULT_WORKERS = 3;
 const ATTEMPTS = 3;
+
+let workersPromise: Promise<number> | null = null;
+
+/** Parallel chunk POSTs — scales with Discord bot tokens on the server. */
+export async function uploadWorkers(): Promise<number> {
+  if (!workersPromise) {
+    workersPromise = fetch("/api/info", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) return DEFAULT_WORKERS;
+        const body = (await res.json()) as { workers?: unknown };
+        const n = Number(body.workers);
+        return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 32) : DEFAULT_WORKERS;
+      })
+      .catch(() => DEFAULT_WORKERS);
+  }
+  return workersPromise;
+}
 
 export async function uploadFileChunked(
   file: File,
@@ -25,6 +45,7 @@ export async function uploadFileChunked(
   const report = () =>
     onProgress(loaded.reduce((a, b) => a + b, 0), file.size);
 
+  const workers = Math.min(await uploadWorkers(), chunkCount);
   let next = 0;
   async function worker(): Promise<void> {
     while (next < chunkCount) {
@@ -38,7 +59,7 @@ export async function uploadFileChunked(
       report();
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, chunkCount) }, worker));
+  await Promise.all(Array.from({ length: workers }, worker));
 
   const res = await fetch("/api/upload/complete", {
     method: "POST",
