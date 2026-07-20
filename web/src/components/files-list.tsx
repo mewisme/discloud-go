@@ -15,30 +15,18 @@ import {
 } from "@/components/ui/table";
 import { formatBytes, formatDate } from "@/lib/format";
 import {
-  listLocalFiles,
+  getLocalFilesServerSnapshot,
+  getLocalFilesSnapshot,
   removeLocalFile,
-  type LocalFile,
+  subscribeLocalFiles,
 } from "@/lib/local-files";
 
-function subscribe(onChange: () => void) {
-  window.addEventListener("storage", onChange);
-  window.addEventListener("discloud:files", onChange);
-  return () => {
-    window.removeEventListener("storage", onChange);
-    window.removeEventListener("discloud:files", onChange);
-  };
-}
-
-function getSnapshot(): LocalFile[] {
-  return listLocalFiles();
-}
-
-function getServerSnapshot(): LocalFile[] {
-  return [];
-}
-
 export function FilesList() {
-  const files = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const files = useSyncExternalStore(
+    subscribeLocalFiles,
+    getLocalFilesSnapshot,
+    getLocalFilesServerSnapshot,
+  );
 
   if (files.length === 0) {
     return (
@@ -112,10 +100,7 @@ export function FilesList() {
                       variant="ghost"
                       size="icon-sm"
                       aria-label={`Remove ${f.fileName} from list`}
-                      onClick={() => {
-                        removeLocalFile(f.fileId);
-                        window.dispatchEvent(new Event("discloud:files"));
-                      }}
+                      onClick={() => removeLocalFile(f.fileId)}
                     >
                       <Trash2 aria-hidden />
                     </Button>
