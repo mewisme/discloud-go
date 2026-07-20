@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/format";
 import {
+  cancelUpload,
   clearDone,
   enqueue,
   getState,
@@ -99,8 +100,20 @@ export function Uploader() {
       </div>
 
       {state.uploading && (
-        <Card className="w-full">
-          <CardContent className="flex flex-col gap-2">
+        <Card className="group w-full">
+          <CardContent className="relative flex flex-col gap-2 pr-10">
+            {state.canCancel && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute top-0 right-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                aria-label={`Cancel upload of ${state.uploading.fileName}`}
+                onClick={() => cancelUpload()}
+              >
+                <X aria-hidden />
+              </Button>
+            )}
             <Progress value={state.uploading.percent} className="gap-2">
               <ProgressLabel className="truncate">
                 Uploading {state.uploading.fileName}

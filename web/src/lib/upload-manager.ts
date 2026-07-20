@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 
 import type { UploadResult } from "@/lib/api";
-import { uploadFileChunked } from "@/lib/chunked-upload";
+import { isAbortError, uploadFileChunked } from "@/lib/chunked-upload";
 import { rememberLocalFile } from "@/lib/local-files";
 
 export type QueuedItem = { id: string; name: string; size: number };
@@ -9,6 +9,8 @@ export type QueuedItem = { id: string; name: string; size: number };
 export type UploadManagerState = {
   /** Active upload (this tab or mirrored from another). */
   uploading: { fileName: string; percent: number } | null;
+  /** True when this tab owns the in-flight upload (can cancel). */
+  canCancel: boolean;
   /** Files waiting in this tab (File blobs are tab-local). */
   queue: QueuedItem[];
   /** Extra pending count published by the owner tab (for peer UIs). */
@@ -37,6 +39,7 @@ let lastResult: UploadResult | null = null;
 let remoteQueue = 0;
 let jobs: Job[] = [];
 let running = false;
+let abortCtrl: AbortController | null = null;
 let ownerId: string | null = null;
 let tabId = "";
 let channel: BroadcastChannel | null = null;
@@ -45,6 +48,7 @@ let lastPublishedPercent = -1;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 let cached: UploadManagerState = {
   uploading: null,
+  canCancel: false,
   queue: [],
   remoteQueue: 0,
   lastResult: null,
@@ -73,6 +77,7 @@ function queueView(): QueuedItem[] {
 function snapshot(): UploadManagerState {
   cached = {
     uploading,
+    canCancel: running,
     queue: queueView(),
     remoteQueue: ownerId === ensureTabId() ? 0 : remoteQueue,
     lastResult,
@@ -250,6 +255,8 @@ function syncFromPeers(): void {
 
   window.addEventListener("pagehide", () => {
     if (ownerId === ensureTabId() && (uploading || jobs.length > 0)) {
+      abortCtrl?.abort();
+      abortCtrl = null;
       jobs = [];
       uploading = null;
       running = false;
@@ -281,35 +288,45 @@ async function pump(): Promise<void> {
   }
 
   running = true;
+  abortCtrl = new AbortController();
   const id = ensureTabId();
   ownerId = id;
   uploading = { fileName: next.file.name, percent: 0 };
   publish();
 
   try {
-    const result = await uploadFileChunked(next.file, (sent, total) => {
-      const percent = Math.round((sent / total) * 100);
-      if (
-        percent === lastPublishedPercent &&
-        uploading?.fileName === next.file.name
-      ) {
-        return;
-      }
-      uploading = { fileName: next.file.name, percent };
-      publish();
-    });
+    const result = await uploadFileChunked(
+      next.file,
+      (sent, total) => {
+        const percent = Math.round((sent / total) * 100);
+        if (
+          percent === lastPublishedPercent &&
+          uploading?.fileName === next.file.name
+        ) {
+          return;
+        }
+        uploading = { fileName: next.file.name, percent };
+        publish();
+      },
+      abortCtrl.signal,
+    );
     rememberLocalFile(result);
     window.dispatchEvent(new Event("discloud:files"));
     lastResult = result;
     toast.success(`${result.fileName} uploaded`);
   } catch (err: unknown) {
-    toast.error(err instanceof Error ? err.message : "Upload failed", {
-      description:
-        "Retrying the upload will skip chunks that already made it through.",
-    });
+    if (isAbortError(err)) {
+      toast.message(`Cancelled ${next.file.name}`);
+    } else {
+      toast.error(err instanceof Error ? err.message : "Upload failed", {
+        description:
+          "Retrying the upload will skip chunks that already made it through.",
+      });
+    }
   } finally {
     uploading = null;
     running = false;
+    abortCtrl = null;
     publish();
     if (jobs.length > 0) void pump();
   }
@@ -367,6 +384,12 @@ export function removeQueued(id: string): void {
   const before = jobs.length;
   jobs = jobs.filter((j) => j.id !== id);
   if (jobs.length !== before) publish();
+}
+
+/** Abort the in-flight upload owned by this tab (queue is kept). */
+export function cancelUpload(): void {
+  syncFromPeers();
+  abortCtrl?.abort();
 }
 
 export function clearDone(): void {

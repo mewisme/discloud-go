@@ -33,11 +33,13 @@ export async function uploadWorkers(): Promise<number> {
 export async function uploadFileChunked(
   file: File,
   onProgress: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<UploadResult> {
   if (file.size === 0) throw new Error("File is empty");
   if (!crypto.subtle) {
     throw new Error("Uploads require a secure context (https or localhost)");
   }
+  throwIfAborted(signal);
 
   const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
   const hashes: string[] = new Array(chunkCount);
@@ -49,22 +51,29 @@ export async function uploadFileChunked(
   let next = 0;
   async function worker(): Promise<void> {
     while (next < chunkCount) {
+      throwIfAborted(signal);
       const idx = next++;
       const blob = file.slice(idx * CHUNK_SIZE, Math.min((idx + 1) * CHUNK_SIZE, file.size));
-      hashes[idx] = await uploadChunkWithRetry(blob, (sent) => {
-        loaded[idx] = sent;
-        report();
-      });
+      hashes[idx] = await uploadChunkWithRetry(
+        blob,
+        (sent) => {
+          loaded[idx] = sent;
+          report();
+        },
+        signal,
+      );
       loaded[idx] = blob.size;
       report();
     }
   }
   await Promise.all(Array.from({ length: workers }, worker));
 
+  throwIfAborted(signal);
   const res = await fetch("/api/upload/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileName: file.name, chunkHashes: hashes }),
+    signal,
   });
   if (!res.ok) {
     throw new Error(`Could not finalize upload (${res.status})`);
@@ -75,17 +84,23 @@ export async function uploadFileChunked(
 async function uploadChunkWithRetry(
   blob: Blob,
   onChunkProgress: (sent: number) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    throwIfAborted(signal);
     try {
       const buf = await blob.arrayBuffer();
       const hash = await sha256Hex(buf);
       // Skip the upload entirely if the server already has these bytes.
-      const check = await fetch(`/api/chunks/${hash}`, { method: "HEAD" });
+      const check = await fetch(`/api/chunks/${hash}`, {
+        method: "HEAD",
+        signal,
+      });
       if (check.ok) return hash;
-      return await postChunk(buf, onChunkProgress);
+      return await postChunk(buf, onChunkProgress, signal);
     } catch (err) {
+      if (isAbortError(err)) throw err;
       lastError = err;
       onChunkProgress(0);
       if (attempt < ATTEMPTS) {
@@ -100,14 +115,25 @@ async function uploadChunkWithRetry(
 function postChunk(
   buf: ArrayBuffer,
   onChunkProgress: (sent: number) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    const onAbort = () => {
+      xhr.abort();
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     xhr.open("POST", "/api/chunks");
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onChunkProgress(e.loaded);
     };
     xhr.onload = () => {
+      signal?.removeEventListener("abort", onAbort);
       if (xhr.status === 200) {
         const body = JSON.parse(xhr.responseText) as { hash: string };
         resolve(body.hash);
@@ -115,9 +141,31 @@ function postChunk(
         reject(new Error(`Chunk upload failed (${xhr.status})`));
       }
     };
-    xhr.onerror = () => reject(new Error("Chunk upload failed: network error"));
+    xhr.onerror = () => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(new Error("Chunk upload failed: network error"));
+    };
+    xhr.onabort = () => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(abortError());
+    };
     xhr.send(buf);
   });
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
+function abortError(): DOMException {
+  return new DOMException("Upload cancelled", "AbortError");
+}
+
+export function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
 }
 
 async function sha256Hex(buf: ArrayBuffer): Promise<string> {
