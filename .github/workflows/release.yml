@@ -36,11 +36,63 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Native per-arch builds (no QEMU). Digests are merged into one multi-arch image.
   frontend-image:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            digest_name: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            digest_name: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/discloud-web
+      - uses: docker/build-push-action@v7
+        id: build
+        with:
+          context: web
+          platforms: ${{ matrix.platform }}
+          # Push untagged digests only; frontend-manifest tags the combined image.
+          outputs: type=image,"name=ghcr.io/${{ github.repository_owner }}/discloud-web",push-by-digest=true,name-canonical=true,push=true
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=gha,scope=discloud-web-${{ matrix.digest_name }}
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache-${{ matrix.digest_name }}
+          cache-to: |
+            type=gha,mode=max,scope=discloud-web-${{ matrix.digest_name }}
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache-${{ matrix.digest_name }},mode=max
+          build-args: |
+            API_URL=http://api:8080
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.digest_name }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  frontend-manifest:
+    needs: frontend-image
+    runs-on: ubuntu-latest
+    steps:
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -54,20 +106,22 @@ jobs:
           tags: |
             type=semver,pattern=v{{version}}
             type=raw,value=latest
-      - uses: docker/build-push-action@v7
+      - uses: actions/download-artifact@v4
         with:
-          context: web
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # GHA cache is fast on the same runner pool; registry cache survives
-          # across jobs/repos and works better for multi-arch (amd64+arm64).
-          cache-from: |
-            type=gha,scope=discloud-web
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache
-          cache-to: |
-            type=gha,mode=max,scope=discloud-web
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache,mode=max
-          build-args: |
-            API_URL=http://api:8080
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Merge digests into one multi-arch image
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/discloud-web
+        run: |
+          set -euo pipefail
+          # metadata-action exports DOCKER_METADATA_OUTPUT_JSON with the tag list.
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$DOCKER_METADATA_OUTPUT_JSON")
+          refs=$(printf "${IMAGE}@sha256:%s " *)
+          # One manifest list: same tags for amd64 + arm64.
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $tags $refs
+          echo "Merged:"
+          docker buildx imagetools inspect "$(echo "$DOCKER_METADATA_OUTPUT_JSON" | jq -r '.tags[0]')"

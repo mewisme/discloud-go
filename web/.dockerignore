@@ -1,4 +1,11 @@
-node_modules/
-.next/
+node_modules
+.next
+out
 Dockerfile
 .env*
+*.md
+.eslintrc*
+eslint.config.*
+tsconfig.tsbuildinfo
+.git
+.gitignore
