@@ -12,6 +12,10 @@ export type ActiveUpload = {
   fileName: string;
   percent: number;
   phase: UploadPhase;
+  sent: number;
+  total: number;
+  /** Instantaneous throughput (bytes/sec); 0 when unknown. */
+  bytesPerSec: number;
 };
 
 export type UploadManagerState = {
@@ -46,10 +50,14 @@ function normalizeActive(
   u: ActiveUpload | { fileName: string; percent: number } | null,
 ): ActiveUpload | null {
   if (!u) return null;
+  const full = u as Partial<ActiveUpload>;
   return {
     fileName: u.fileName,
     percent: u.percent,
-    phase: "phase" in u && u.phase === "processing" ? "processing" : "uploading",
+    phase: full.phase === "processing" ? "processing" : "uploading",
+    sent: typeof full.sent === "number" ? full.sent : 0,
+    total: typeof full.total === "number" ? full.total : 0,
+    bytesPerSec: typeof full.bytesPerSec === "number" ? full.bytesPerSec : 0,
   };
 }
 
@@ -310,25 +318,47 @@ async function pump(): Promise<void> {
   abortCtrl = new AbortController();
   const id = ensureTabId();
   ownerId = id;
-  uploading = { fileName: next.file.name, percent: 0, phase: "uploading" };
+  uploading = {
+    fileName: next.file.name,
+    percent: 0,
+    phase: "uploading",
+    sent: 0,
+    total: next.file.size,
+    bytesPerSec: 0,
+  };
   publish();
+
+  let speedSent = 0;
+  let speedAt = now();
+  let bytesPerSec = 0;
+  let lastUIPublish = 0;
 
   try {
     const result = await uploadFileChunked(
       next.file,
       (sent, total) => {
-        const percent = Math.round((sent / total) * 100);
-        if (
+        const t = now();
+        if (t - speedAt >= 300) {
+          const dt = (t - speedAt) / 1000;
+          bytesPerSec = dt > 0 ? (sent - speedSent) / dt : 0;
+          speedSent = sent;
+          speedAt = t;
+        }
+        const percent = total > 0 ? Math.round((sent / total) * 100) : 0;
+        const samePct =
           percent === lastPublishedPercent &&
           uploading?.fileName === next.file.name &&
-          uploading.phase === "uploading"
-        ) {
-          return;
-        }
+          uploading.phase === "uploading";
+        // Throttle UI while percent is flat; still refresh ~5 Hz for MB/s.
+        if (samePct && t - lastUIPublish < 200) return;
+        lastUIPublish = t;
         uploading = {
           fileName: next.file.name,
           percent,
           phase: "uploading",
+          sent,
+          total,
+          bytesPerSec,
         };
         publish();
       },
@@ -338,6 +368,9 @@ async function pump(): Promise<void> {
           fileName: next.file.name,
           percent: 100,
           phase: "processing",
+          sent: next.file.size,
+          total: next.file.size,
+          bytesPerSec: 0,
         };
         publish();
       },

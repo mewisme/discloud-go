@@ -12,7 +12,7 @@ import {
   ProgressLabel,
   ProgressValue,
 } from "@/components/ui/progress";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatSpeed } from "@/lib/format";
 import {
   cancelUpload,
   clearDone,
@@ -132,14 +132,29 @@ export function Uploader() {
                 <div className="relative h-1 w-full overflow-hidden rounded-full bg-muted">
                   <div className="absolute inset-y-0 w-2/5 rounded-full bg-primary animate-upload-indeterminate" />
                 </div>
+                {state.uploading.total > 0 && (
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {formatBytes(state.uploading.total)} uploaded
+                  </p>
+                )}
               </div>
             ) : (
-              <Progress value={state.uploading.percent} className="gap-2">
-                <ProgressLabel className="truncate">
-                  Uploading {state.uploading.fileName}
-                </ProgressLabel>
-                <ProgressValue />
-              </Progress>
+              <>
+                <Progress value={state.uploading.percent} className="gap-2">
+                  <ProgressLabel className="truncate">
+                    Uploading {state.uploading.fileName}
+                  </ProgressLabel>
+                  <ProgressValue />
+                </Progress>
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {formatBytes(state.uploading.sent)}
+                  {state.uploading.total > 0
+                    ? ` / ${formatBytes(state.uploading.total)}`
+                    : ""}
+                  {" · "}
+                  {formatSpeed(state.uploading.bytesPerSec)}
+                </p>
+              </>
             )}
             <p className="text-xs text-muted-foreground">
               {processing
