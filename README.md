@@ -35,14 +35,14 @@ default `latest`). Build from source instead:
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
 
-The API is not published on the host. Next.js rewrites `/api/*`, `/f/*`, and
-`/readyz` to it — one origin for the browser and Cloudflare.
+The API is not published on the host. Next.js route handlers proxy `/api/*`,
+`/f/*`, and `/readyz` to it — one origin for the browser and Cloudflare.
 
 ## Development
 
 ```bash
 go run ./cmd/discloud          # needs DATABASE_URL, VALKEY_URL, Discord env
-cd web && pnpm i && pnpm dev  # proxies API to :8080
+cd web && pnpm i && pnpm dev  # route handlers proxy API to :8080
 ```
 
 ```bash

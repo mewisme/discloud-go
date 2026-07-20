@@ -15,8 +15,8 @@ services:
       GOMEMLIMIT: 96MiB
       GOGC: "50"
     # Not published on purpose: all API traffic (browser and programmatic)
-    # goes through the web service's rewrites, so Cloudflare fronts a single
-    # origin and the API can't be reached around it.
+    # goes through the web service's route-handler proxy, so Cloudflare fronts
+    # a single origin and the API can't be reached around it.
     expose:
       - "8080"
     depends_on:

@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FolderOpen, Trash2, X } from "lucide-react";
+import { Download, ExternalLink, FolderOpen, Trash2, X } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { CopyButton } from "@/components/copy-button";
@@ -70,64 +70,80 @@ export function FilesList() {
               <TableHead>Name</TableHead>
               <TableHead className="w-28">Size</TableHead>
               <TableHead className="w-44">Uploaded</TableHead>
-              <TableHead className="w-24 text-right">
+              <TableHead className="w-28 text-right">
                 <span className="sr-only">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {files.map((f) => (
-              <TableRow
-                key={f.fileId}
-                data-state={selectedId === f.fileId ? "selected" : undefined}
-                className={cn(selectedId === f.fileId && "bg-muted/50")}
-              >
-                <TableCell className="max-w-0 truncate font-medium">
-                  <button
-                    type="button"
-                    className="truncate text-left hover:underline"
-                    onClick={() =>
-                      setSelectedId((id) =>
-                        id === f.fileId ? null : f.fileId,
-                      )
-                    }
-                  >
-                    {f.fileName}
-                  </button>
-                </TableCell>
-                <TableCell className="tabular-nums text-muted-foreground">
-                  {formatBytes(f.fileSize)}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDate(f.createdAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="inline-flex items-center gap-0.5">
-                    <a
-                      href={`/f/${f.fileId}/${f.fileName}?download=1`}
-                      className={buttonVariants({
-                        variant: "ghost",
-                        size: "icon-sm",
-                      })}
-                      aria-label={`Download ${f.fileName}`}
+            {files.map((f) => {
+              const viewHref = `/f/${f.fileId}/${encodeURIComponent(f.fileName)}`;
+              const downloadHref = `${viewHref}?download=1`;
+              return (
+                <TableRow
+                  key={f.fileId}
+                  data-state={selectedId === f.fileId ? "selected" : undefined}
+                  className={cn(selectedId === f.fileId && "bg-muted/50")}
+                >
+                  <TableCell className="max-w-0 truncate font-medium">
+                    <button
+                      type="button"
+                      className="truncate text-left hover:underline"
+                      onClick={() =>
+                        setSelectedId((id) =>
+                          id === f.fileId ? null : f.fileId,
+                        )
+                      }
                     >
-                      <Download aria-hidden />
-                    </a>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Remove ${f.fileName} from list`}
-                      onClick={() => {
-                        if (selectedId === f.fileId) setSelectedId(null);
-                        removeLocalFile(f.fileId);
-                      }}
-                    >
-                      <Trash2 aria-hidden />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+                      {f.fileName}
+                    </button>
+                  </TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {formatBytes(f.fileSize)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(f.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="inline-flex items-center gap-0.5">
+                      <a
+                        href={viewHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={buttonVariants({
+                          variant: "ghost",
+                          size: "icon-sm",
+                        })}
+                        aria-label={`Open ${f.fileName} in new tab`}
+                      >
+                        <ExternalLink aria-hidden />
+                      </a>
+                      <a
+                        href={downloadHref}
+                        className={buttonVariants({
+                          variant: "ghost",
+                          size: "icon-sm",
+                        })}
+                        aria-label={`Download ${f.fileName}`}
+                      >
+                        <Download aria-hidden />
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Remove ${f.fileName} from list`}
+                        onClick={() => {
+                          if (selectedId === f.fileId) setSelectedId(null);
+                          removeLocalFile(f.fileId);
+                        }}
+                      >
+                        <Trash2 aria-hidden />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
