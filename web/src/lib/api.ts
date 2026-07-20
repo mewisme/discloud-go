@@ -17,14 +17,26 @@ export interface FileMeta {
   createdAt: string;
 }
 
-/** API origin for server-side fetches (inside Docker: http://api:8080). */
-export const API_URL = process.env.API_URL ?? "http://localhost:8080";
+/** Absolute URL on the public API (no Next proxy). */
+export function apiURL(path: string): string {
+  const injected =
+    typeof globalThis !== "undefined"
+      ? (globalThis as { __DISCLOUD_API__?: string }).__DISCLOUD_API__
+      : undefined;
+  const base = (
+    injected ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8080"
+  ).replace(/\/$/, "");
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${p}`;
+}
 
 export async function fetchFileMeta(
   fileId: string,
   init?: RequestInit,
 ): Promise<FileMeta> {
-  const res = await fetch(`/api/files/${fileId}`, {
+  const res = await fetch(apiURL(`/api/files/${fileId}`), {
     cache: "no-store",
     ...init,
   });

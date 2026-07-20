@@ -11,14 +11,11 @@ services:
       VALKEY_URL: valkey://valkey:6379
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set in .env}
       DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:?set in .env}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       GOMEMLIMIT: 96MiB
       GOGC: "50"
-    # Not published on purpose: all API traffic (browser and programmatic)
-    # goes through the web service's route-handler proxy, so Cloudflare fronts
-    # a single origin and the API can't be reached around it.
-    expose:
-      - "8080"
+    ports:
+      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,7 +31,8 @@ services:
     image: ghcr.io/mewisme/discloud-web:${DISCLOUD_TAG:-latest}
     pull_policy: always
     environment:
-      API_URL: http://api:8080
+      # Browser-facing API origin (not the Docker-internal hostname).
+      API_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       NODE_OPTIONS: --max-old-space-size=192
     ports:
       - "3000:3000"

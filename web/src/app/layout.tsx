@@ -30,12 +30,25 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const apiOrigin = (
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8080"
+  ).replace(/\/$/, "");
+
   return (
     <html
       lang="en"
       suppressHydrationWarning
       className={cn("h-full", "antialiased", geistMono.variable, "font-sans", inter.variable)}
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `self.__DISCLOUD_API__=${JSON.stringify(apiOrigin)}`,
+          }}
+        />
+      </head>
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <HealthBanner />

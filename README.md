@@ -18,7 +18,7 @@ URLs (cached in Valkey).
    ```
 
    Set `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`. Behind Cloudflare, also set
-   `PUBLIC_BASE_URL` to your public origin.
+   `PUBLIC_BASE_URL` to your public API origin (share links).
 
 3. Run:
 
@@ -26,7 +26,7 @@ URLs (cached in Valkey).
    docker compose up -d
    ```
 
-   Open [http://localhost:3000](http://localhost:3000).
+   UI: [http://localhost:3000](http://localhost:3000) · API: [http://localhost:8080](http://localhost:8080).
 
 Images come from `ghcr.io/mewisme/discloud` and `discloud-web` (`DISCLOUD_TAG`,
 default `latest`). Build from source instead:
@@ -35,14 +35,15 @@ default `latest`). Build from source instead:
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
 
-The API is not published on the host. Next.js route handlers proxy `/api/*`,
-`/f/*`, and `/readyz` to it — one origin for the browser and Cloudflare.
+The API is published on **:8080**. Point Cloudflare at it for `/api/*`, `/f/*`,
+and `/readyz`. The web UI on **:3000** calls that origin directly (set
+`PUBLIC_BASE_URL` / web `API_URL` to the browser-reachable API URL).
 
 ## Development
 
 ```bash
 go run ./cmd/discloud          # needs DATABASE_URL, VALKEY_URL, Discord env
-cd web && pnpm i && pnpm dev  # route handlers proxy API to :8080
+cd web && pnpm i && pnpm dev  # talks to API at NEXT_PUBLIC_API_URL / :8080
 ```
 
 ```bash
@@ -52,7 +53,7 @@ make up / make up-build / make down
 
 ## API
 
-Use the site origin (`http://localhost:3000` or your domain). Full reference:
+API is on **:8080** (`http://localhost:8080` or your public API origin). Docs UI:
 [/docs](http://localhost:3000/docs).
 
 | | |
@@ -66,6 +67,7 @@ Use the site origin (`http://localhost:3000` or your domain). Full reference:
 | `GET /healthz` · `/readyz` | Health |
 
 ```bash
+export BASE=http://localhost:8080
 curl -X POST --data-binary @file.bin "$BASE/api/upload?fileName=file.bin"
 curl -OJ "$BASE/f/<fileId>?download=1"
 ```
@@ -76,7 +78,7 @@ curl -OJ "$BASE/f/<fileId>?download=1"
 | --- | --- |
 | `DISCORD_BOT_TOKEN` | Required. Comma-separated tokens → parallel Discord uploads (one worker per bot) |
 | `DISCORD_CHANNEL_ID` | Required. Channel that holds chunks |
-| `PUBLIC_BASE_URL` | Share-link origin (Compose default `http://localhost:3000`) |
+| `PUBLIC_BASE_URL` | Share-link origin (Compose default `http://localhost:8080`) |
 | `DISCLOUD_TAG` | Image tag (default `latest`) |
 | `POSTGRES_PASSWORD` | Compose DB password (default `discloud`) |
 

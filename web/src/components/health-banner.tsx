@@ -1,5 +1,6 @@
 "use client";
 
+import { apiURL } from "@/lib/api";
 import { TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -8,7 +9,7 @@ export function HealthBanner() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/readyz", { signal: controller.signal, cache: "no-store" })
+    fetch(apiURL("/readyz"), { signal: controller.signal, cache: "no-store" })
       .then((res) => setDegraded(!res.ok))
       .catch((err: unknown) => {
         if (!(err instanceof DOMException && err.name === "AbortError")) {

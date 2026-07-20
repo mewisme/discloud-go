@@ -13,8 +13,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && corepack prepare --activate
-ARG API_URL=http://api:8080
-ENV API_URL=${API_URL} NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production
+ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production
 RUN --mount=type=cache,id=discloud-next,target=/app/.next/cache \
     pnpm run build
 

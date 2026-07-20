@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { fetchFileMeta, type FileMeta } from "@/lib/api";
+import { fetchFileMeta, apiURL, type FileMeta } from "@/lib/api";
 import { formatBytes, formatDate } from "@/lib/format";
 import {
   getLocalFilesServerSnapshot,
@@ -77,7 +77,9 @@ export function FilesList() {
           </TableHeader>
           <TableBody>
             {files.map((f) => {
-              const viewHref = `/f/${f.fileId}/${encodeURIComponent(f.fileName)}`;
+              const viewHref = apiURL(
+                `/f/${f.fileId}/${encodeURIComponent(f.fileName)}`,
+              );
               const downloadHref = `${viewHref}?download=1`;
               return (
                 <TableRow

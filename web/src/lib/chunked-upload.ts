@@ -1,13 +1,10 @@
-import type { UploadResult } from "@/lib/api";
+import { apiURL, type UploadResult } from "@/lib/api";
 
 /**
- * Chunked upload that stays under proxy body-size limits (Cloudflare caps
- * proxied requests at 100 MB): the file is split into 8 MB chunks matching
- * the server's storage chunk size, each chunk is SHA-256 hashed and skipped
- * if the server already has it, so retried uploads resume where they left off.
+ * Chunked upload: split into 8 MB pieces matching the server's storage chunk
+ * size, SHA-256 hash each, skip uploads the server already has, then assemble.
  *
- * Worker count comes from GET /api/info (matches Discord bot token count when
- * multiple tokens are configured).
+ * Worker count comes from GET /api/info (Discord bot token count).
  */
 const CHUNK_SIZE = 8 * 1024 * 1024;
 const DEFAULT_WORKERS = 3;
@@ -18,7 +15,7 @@ let workersPromise: Promise<number> | null = null;
 /** Parallel chunk POSTs — scales with Discord bot tokens on the server. */
 export async function uploadWorkers(): Promise<number> {
   if (!workersPromise) {
-    workersPromise = fetch("/api/info", { cache: "no-store" })
+    workersPromise = fetch(apiURL("/api/info"), { cache: "no-store" })
       .then(async (res) => {
         if (!res.ok) return DEFAULT_WORKERS;
         const body = (await res.json()) as { workers?: unknown };
@@ -69,7 +66,7 @@ export async function uploadFileChunked(
   await Promise.all(Array.from({ length: workers }, worker));
 
   throwIfAborted(signal);
-  const res = await fetch("/api/upload/complete", {
+  const res = await fetch(apiURL("/api/upload/complete"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileName: file.name, chunkHashes: hashes }),
@@ -93,7 +90,7 @@ async function uploadChunkWithRetry(
       const buf = await blob.arrayBuffer();
       const hash = await sha256Hex(buf);
       // Skip the upload entirely if the server already has these bytes.
-      const check = await fetch(`/api/chunks/${hash}`, {
+      const check = await fetch(apiURL(`/api/chunks/${hash}`), {
         method: "HEAD",
         signal,
       });
@@ -128,7 +125,7 @@ function postChunk(
       reject(abortError());
     };
     signal?.addEventListener("abort", onAbort, { once: true });
-    xhr.open("POST", "/api/chunks");
+    xhr.open("POST", apiURL("/api/chunks"));
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onChunkProgress(e.loaded);
     };
