@@ -27,7 +27,7 @@ func Load() (Config, error) {
 		ValkeyURL:        os.Getenv("VALKEY_URL"),
 		DiscordBotToken:  strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
 		DiscordChannelID: os.Getenv("DISCORD_CHANNEL_ID"),
-		PublicBaseURL:    os.Getenv("PUBLIC_BASE_URL"),
+		PublicBaseURL:    strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")),
 	}
 	for name, v := range map[string]string{
 		"DATABASE_URL":       c.DatabaseURL,

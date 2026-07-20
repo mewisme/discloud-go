@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 
-import type { UploadResult } from "@/lib/api";
+import { withPublicURLs, type UploadResult } from "@/lib/api";
 import { isAbortError, uploadFileChunked } from "@/lib/chunked-upload";
 import { rememberLocalFile } from "@/lib/local-files";
 
@@ -342,10 +342,11 @@ async function pump(): Promise<void> {
         publish();
       },
     );
-    rememberLocalFile(result);
+    const publicResult = withPublicURLs(result);
+    rememberLocalFile(publicResult);
     window.dispatchEvent(new Event("discloud:files"));
-    lastResult = result;
-    toast.success(`${result.fileName} uploaded`);
+    lastResult = publicResult;
+    toast.success(`${publicResult.fileName} uploaded`);
   } catch (err: unknown) {
     if (isAbortError(err)) {
       toast.message(`Cancelled ${next.file.name}`);

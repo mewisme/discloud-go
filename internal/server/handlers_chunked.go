@@ -152,13 +152,5 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 
 	base := s.baseURL(r)
 	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(fileSize), "chunks", len(parts))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"fileId":          f.ID,
-		"fileName":        f.Name,
-		"fileSize":        fileSize,
-		"url":             fmt.Sprintf("%s/f/%s", base, f.ID),
-		"longURL":         fmt.Sprintf("%s/f/%s/%s", base, f.ID, f.Name),
-		"downloadURL":     fmt.Sprintf("%s/f/%s?download=1", base, f.ID),
-		"longDownloadURL": fmt.Sprintf("%s/f/%s/%s?download=1", base, f.ID, f.Name),
-	})
+	writeJSON(w, http.StatusOK, fileLinks(base, f.ID, f.Name, fileSize))
 }

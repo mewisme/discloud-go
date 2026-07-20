@@ -107,15 +107,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	base := s.baseURL(r)
 	s.log.Info("file uploaded", "file", fileName, "size", humanBytes(fileSize), "chunks", len(parts))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"fileId":          fileID,
-		"fileName":        fileName,
-		"fileSize":        fileSize,
-		"url":             fmt.Sprintf("%s/f/%s", base, fileID),
-		"longURL":         fmt.Sprintf("%s/f/%s/%s", base, fileID, fileName),
-		"downloadURL":     fmt.Sprintf("%s/f/%s?download=1", base, fileID),
-		"longDownloadURL": fmt.Sprintf("%s/f/%s/%s?download=1", base, fileID, fileName),
-	})
+	writeJSON(w, http.StatusOK, fileLinks(base, fileID, fileName, fileSize))
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -289,8 +281,8 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) baseURL(r *http.Request) string {
-	if s.publicBaseURL != "" {
-		return strings.TrimSuffix(s.publicBaseURL, "/")
+	if u := strings.TrimSuffix(strings.TrimSpace(s.publicBaseURL), "/"); u != "" {
+		return u
 	}
 	scheme := "http"
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
@@ -299,6 +291,19 @@ func (s *Server) baseURL(r *http.Request) string {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+// fileLinks builds share/download URLs from PUBLIC_BASE_URL (or request host).
+func fileLinks(base, fileID, fileName string, fileSize int64) map[string]any {
+	return map[string]any{
+		"fileId":          fileID,
+		"fileName":        fileName,
+		"fileSize":        fileSize,
+		"url":             fmt.Sprintf("%s/f/%s", base, fileID),
+		"longURL":         fmt.Sprintf("%s/f/%s/%s", base, fileID, fileName),
+		"downloadURL":     fmt.Sprintf("%s/f/%s?download=1", base, fileID),
+		"longDownloadURL": fmt.Sprintf("%s/f/%s/%s?download=1", base, fileID, fileName),
+	}
 }
 
 func newID() string {

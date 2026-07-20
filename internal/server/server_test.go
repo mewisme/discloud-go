@@ -244,6 +244,45 @@ func TestInfoWorkersScaleWithBots(t *testing.T) {
 	}
 }
 
+func TestUploadLinksUsePublicBaseURL(t *testing.T) {
+	fake, discordTS := newFakeDiscord(t)
+	dc := discord.New("test-token", "test-channel")
+	dc.BaseURL = discordTS.URL
+	ca := &memCache{urls: map[string]string{}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	const public = "https://files.example.com"
+	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, public)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Post(ts.URL+"/api/upload?fileName=a.txt", "application/octet-stream", strings.NewReader("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var up struct {
+		URL             string `json:"url"`
+		LongURL         string `json:"longURL"`
+		DownloadURL     string `json:"downloadURL"`
+		LongDownloadURL string `json:"longDownloadURL"`
+		FileID          string `json:"fileId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(up.URL, public+"/") {
+		t.Fatalf("url = %q, want prefix %q (not request host %q)", up.URL, public, ts.URL)
+	}
+	wantLong := public + "/f/" + up.FileID + "/a.txt"
+	if up.LongURL != wantLong {
+		t.Fatalf("longURL = %q, want %q", up.LongURL, wantLong)
+	}
+	if !strings.HasPrefix(up.DownloadURL, public+"/") || !strings.HasPrefix(up.LongDownloadURL, public+"/") {
+		t.Fatalf("download URLs missing public base: %+v", up)
+	}
+	_ = fake
+}
+
 func TestUploadDownloadRoundTrip(t *testing.T) {
 	ts, fake, ca := newTestServer(t)
 

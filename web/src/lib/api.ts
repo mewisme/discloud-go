@@ -28,6 +28,19 @@ export function apiURL(path: string): string {
   return `${base}${p}`;
 }
 
+/** Rebuild share links from the runtime API origin (PUBLIC_BASE_URL inject). */
+export function withPublicURLs(result: UploadResult): UploadResult {
+  const id = result.fileId;
+  const name = result.fileName;
+  return {
+    ...result,
+    url: apiURL(`/f/${id}`),
+    longURL: apiURL(`/f/${id}/${name}`),
+    downloadURL: apiURL(`/f/${id}?download=1`),
+    longDownloadURL: apiURL(`/f/${id}/${name}?download=1`),
+  };
+}
+
 export async function fetchFileMeta(
   fileId: string,
   init?: RequestInit,
