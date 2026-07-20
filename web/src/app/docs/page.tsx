@@ -136,19 +136,6 @@ export default function DocsPage() {
         <P>Errors: 400 for an empty body, 413 for a body over 8 MB.</P>
       </Endpoint>
 
-      <Endpoint method="POST" path="/api/chunks/batch">
-        <P>
-          Upload up to <strong className="text-foreground">10</strong> chunks in
-          one multipart request (<code className="font-mono">files[0]</code>…
-          <code className="font-mono">files[n]</code>). Missing chunks are
-          stored as multiple attachments on a single Discord message.
-        </P>
-        <DocsCode>{`curl -X POST "$BASE/api/chunks/batch" \\
-  -F "files[0]=@part-aa" -F "files[1]=@part-ab"`}</DocsCode>
-        <P>Response (200):</P>
-        <DocsCode>{`{ "chunks": [{ "hash": "…", "existed": false }, …] }`}</DocsCode>
-      </Endpoint>
-
       <Endpoint method="POST" path="/api/upload/complete">
         <P>
           Assemble a file from previously uploaded chunks, in order. The file
