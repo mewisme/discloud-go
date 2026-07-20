@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
 import { Cloud } from "lucide-react";
 import { Toaster } from "sonner";
@@ -8,11 +8,9 @@ import { HealthBanner } from "@/components/health-banner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
+import { cn } from "@/lib/utils";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -36,9 +34,9 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={cn("h-full", "antialiased", geistMono.variable, "font-sans", inter.variable)}
     >
-      <body className="flex min-h-full flex-col bg-background text-foreground">
+      <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <HealthBanner />
           <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur">
@@ -56,6 +54,9 @@ export default function RootLayout({
                 </Link>
                 <Link href="/files" className="transition-colors hover:text-foreground">
                   Files
+                </Link>
+                <Link href="/docs" className="transition-colors hover:text-foreground">
+                  API
                 </Link>
               </nav>
               <div className="ml-auto">

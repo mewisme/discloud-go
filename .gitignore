@@ -1,3 +1,30 @@
+# Build / release
 dist/
-.env
 *.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Env (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# IDE / local tooling
+.cursor/
+.codegraph/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs & OS
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Playwright / local agent artifacts
+.playwright-mcp/

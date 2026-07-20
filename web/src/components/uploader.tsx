@@ -14,7 +14,9 @@ import {
   ProgressValue,
 } from "@/components/ui/progress";
 import type { UploadResult } from "@/lib/api";
+import { uploadFileChunked } from "@/lib/chunked-upload";
 import { formatBytes } from "@/lib/format";
+import { rememberLocalFile } from "@/lib/local-files";
 import { cn } from "@/lib/utils";
 
 type UploadState =
@@ -29,33 +31,25 @@ export function Uploader() {
 
   const upload = useCallback((file: File) => {
     setState({ phase: "uploading", fileName: file.name, percent: 0 });
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/upload?fileName=${encodeURIComponent(file.name)}`);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        setState({
-          phase: "uploading",
-          fileName: file.name,
-          percent: Math.round((e.loaded / e.total) * 100),
-        });
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status === 200) {
-        const result = JSON.parse(xhr.responseText) as UploadResult;
+    uploadFileChunked(file, (sent, total) => {
+      setState({
+        phase: "uploading",
+        fileName: file.name,
+        percent: Math.round((sent / total) * 100),
+      });
+    })
+      .then((result: UploadResult) => {
+        rememberLocalFile(result);
+        window.dispatchEvent(new Event("discloud:files"));
         setState({ phase: "done", result });
         toast.success(`${result.fileName} uploaded`);
-      } else {
+      })
+      .catch((err: unknown) => {
         setState({ phase: "idle" });
-        toast.error(`Upload failed (${xhr.status})`);
-      }
-    };
-    xhr.onerror = () => {
-      setState({ phase: "idle" });
-      toast.error("Upload failed: network error");
-    };
-    xhr.send(file);
+        toast.error(err instanceof Error ? err.message : "Upload failed", {
+          description: "Retrying the upload will skip chunks that already made it through.",
+        });
+      });
   }, []);
 
   const onDrop = useCallback(

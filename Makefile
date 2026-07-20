@@ -9,16 +9,16 @@ test:
 
 lint:
 	gofmt -l .
-	cd web && npm run lint && npx tsc --noEmit
+	cd web && pnpm run lint && pnpm exec tsc --noEmit
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o dist/discloud ./cmd/discloud
 
 web-dev:
-	cd web && npm run dev
+	cd web && pnpm run dev
 
 web-build:
-	cd web && npm run build
+	cd web && pnpm run build
 
 up:
 	docker compose up --build -d

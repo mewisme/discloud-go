@@ -65,7 +65,7 @@ func run(log *slog.Logger) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("server listening", "port", cfg.Port, "version", version)
+		log.Info("server listening", "port", cfg.Port, "version", version, "discord_bots", dc.TokenCount())
 		if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

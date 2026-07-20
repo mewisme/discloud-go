@@ -12,31 +12,62 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const DefaultBaseURL = "https://discord.com/api/v10"
 
+// bot is one Discord bot identity with its own rate-limit clock.
+type bot struct {
+	token     string
+	mu        sync.Mutex
+	waitUntil time.Time
+}
+
 type Client struct {
 	// BaseURL is overridable for tests.
 	BaseURL   string
-	Token     string
 	ChannelID string
 	HTTP      *http.Client
 
-	mu        sync.Mutex
-	waitUntil time.Time // rate-limit backoff shared across goroutines
+	bots []*bot
+	next atomic.Uint64 // round-robin index for uploads
 }
 
+// New builds a client. token may be a single bot token or a comma-separated
+// list; uploads are divided round-robin across the tokens.
 func New(token, channelID string) *Client {
+	tokens := SplitTokens(token)
+	bots := make([]*bot, len(tokens))
+	for i, t := range tokens {
+		bots[i] = &bot{token: t}
+	}
 	return &Client{
 		BaseURL:   DefaultBaseURL,
-		Token:     token,
 		ChannelID: channelID,
 		HTTP:      &http.Client{Timeout: 2 * time.Minute},
+		bots:      bots,
 	}
 }
+
+// SplitTokens splits a comma-separated token list and drops empty entries.
+func SplitTokens(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// TokenCount is how many bots are available for upload distribution.
+func (c *Client) TokenCount() int { return len(c.bots) }
 
 type message struct {
 	ID          string `json:"id"`
@@ -46,10 +77,16 @@ type message struct {
 }
 
 // UploadChunk posts data as a message attachment and returns the message id.
+// Successive calls rotate across configured bot tokens.
 func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) (string, error) {
+	if len(c.bots) == 0 {
+		return "", fmt.Errorf("discord: no bot tokens configured")
+	}
+	b := c.bots[c.next.Add(1)%uint64(len(c.bots))]
+
 	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
-		msg, retryAfter, err := c.postAttachment(ctx, fileName, data)
+		msg, retryAfter, err := c.postAttachment(ctx, b, fileName, data)
 		if err == nil {
 			if len(msg.Attachments) == 0 {
 				return "", fmt.Errorf("discord: message %s has no attachments", msg.ID)
@@ -59,24 +96,29 @@ func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) 
 		if retryAfter <= 0 || attempt >= maxAttempts {
 			return "", err
 		}
-		c.backoff(retryAfter)
+		b.backoff(retryAfter)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(c.sleepFor()):
+		case <-time.After(b.sleepFor()):
 		}
 	}
 }
 
 // AttachmentURL fetches the message and returns its first attachment URL,
-// which Discord re-signs with a fresh expiry on every read.
+// which Discord re-signs with a fresh expiry on every read. Any configured
+// bot that can see the channel may perform the read.
 func (c *Client) AttachmentURL(ctx context.Context, messageID string) (string, error) {
+	if len(c.bots) == 0 {
+		return "", fmt.Errorf("discord: no bot tokens configured")
+	}
+	b := c.bots[0]
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		fmt.Sprintf("%s/channels/%s/messages/%s", c.BaseURL, c.ChannelID, messageID), nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bot "+c.Token)
+	req.Header.Set("Authorization", "Bot "+b.token)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return "", err
@@ -96,9 +138,8 @@ func (c *Client) AttachmentURL(ctx context.Context, messageID string) (string, e
 	return msg.Attachments[0].URL, nil
 }
 
-func (c *Client) postAttachment(ctx context.Context, fileName string, data []byte) (msg message, retryAfter time.Duration, err error) {
-	// Respect any backoff a concurrent upload already learned about.
-	if d := c.sleepFor(); d > 0 {
+func (c *Client) postAttachment(ctx context.Context, b *bot, fileName string, data []byte) (msg message, retryAfter time.Duration, err error) {
+	if d := b.sleepFor(); d > 0 {
 		select {
 		case <-ctx.Done():
 			return message{}, 0, ctx.Err()
@@ -125,7 +166,7 @@ func (c *Client) postAttachment(ctx context.Context, fileName string, data []byt
 	if err != nil {
 		return message{}, 0, err
 	}
-	req.Header.Set("Authorization", "Bot "+c.Token)
+	req.Header.Set("Authorization", "Bot "+b.token)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.HTTP.Do(req)
@@ -139,14 +180,13 @@ func (c *Client) postAttachment(ctx context.Context, fileName string, data []byt
 		return message{}, retryAfter, fmt.Errorf("discord: rate limited, retry after %s", retryAfter)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return message{}, 0, fmt.Errorf("discord: upload %s: %s: %s", fileName, resp.Status, b)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return message{}, 0, fmt.Errorf("discord: upload %s: %s: %s", fileName, resp.Status, raw)
 	}
 
-	// Proactively pause before the bucket empties.
 	if remaining, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining")); err == nil && remaining == 0 {
 		if reset, err := strconv.ParseFloat(resp.Header.Get("X-RateLimit-Reset-After"), 64); err == nil {
-			c.backoff(time.Duration(reset * float64(time.Second)))
+			b.backoff(time.Duration(reset * float64(time.Second)))
 		}
 	}
 
@@ -167,16 +207,16 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 	return time.Second
 }
 
-func (c *Client) backoff(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if until := time.Now().Add(d); until.After(c.waitUntil) {
-		c.waitUntil = until
+func (b *bot) backoff(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if until := time.Now().Add(d); until.After(b.waitUntil) {
+		b.waitUntil = until
 	}
 }
 
-func (c *Client) sleepFor() time.Duration {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return time.Until(c.waitUntil)
+func (b *bot) sleepFor() time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return time.Until(b.waitUntil)
 }

@@ -17,6 +17,9 @@ type Store interface {
 	CreateFile(ctx context.Context, f store.File) error
 	GetFile(ctx context.Context, id string) (store.File, error)
 	ListFiles(ctx context.Context, limit int) ([]store.File, error)
+	HasChunk(ctx context.Context, hash string) (bool, error)
+	PutChunk(ctx context.Context, c store.Chunk) error
+	GetChunks(ctx context.Context, hashes []string) (map[string]store.Chunk, error)
 	Ping(ctx context.Context) error
 }
 
@@ -52,6 +55,9 @@ func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, publicBaseURL
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
+	mux.HandleFunc("GET /api/chunks/{hash}", s.handleChunkCheck)
+	mux.HandleFunc("POST /api/chunks", s.handleChunkUpload)
+	mux.HandleFunc("POST /api/upload/complete", s.handleUploadComplete)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/{id}", s.handleGetFile)
 	mux.HandleFunc("GET /f/{id}", s.handleDownload)

@@ -1,75 +1,120 @@
-# DisCloud Go
+# DisCloud
 
-Unlimited cloud storage backed by Discord attachments — a Go rewrite of
-[mewisme/discloud](https://github.com/mewisme/discloud) with a Next.js frontend.
+Unlimited cloud storage using Discord attachments.
 
-Files are streamed in, split into 8 MB chunks, and uploaded concurrently to a
-Discord channel as message attachments. Metadata lives in PostgreSQL; signed
-CDN URLs (which Discord expires after ~24h) are refreshed on demand and cached
-in Valkey, so share links never go stale.
+Files are split into 8 MB chunks and stored as Discord message attachments.
+Metadata lives in PostgreSQL. Signed CDN URLs are refreshed on download and
+cached in Valkey so share links stay valid.
 
 ## Stack
 
-- **API**: Go 1.26, stdlib `net/http`, `pgx/v5`, `valkey-go`
-- **Frontend**: Next.js 16 (App Router, RSC), TypeScript, Tailwind CSS v4, shadcn/ui
-- **Infra**: Docker Compose (API, web, PostgreSQL 17, Valkey 8), GoReleaser, GitHub Actions
+| Layer | Tech |
+| --- | --- |
+| API | Go, stdlib `net/http`, pgx, valkey-go |
+| Web | Next.js (App Router), TypeScript, Tailwind CSS, shadcn/ui |
+| Data | PostgreSQL 17, Valkey 8 |
+| Deploy | Docker Compose, GoReleaser, GitHub Actions |
 
 ## Quick start
 
-1. Create a Discord bot, invite it to a server, and copy a channel ID
-   (see the [original setup guide](https://github.com/mewisme/discloud#setup-guide)).
-2. Copy the env file and fill in the two Discord values:
+1. Create a Discord bot, invite it to a server with permission to send messages
+   and attach files, then copy a channel ID (Developer Mode → right-click
+   channel → Copy Channel ID).
+2. Configure env:
 
    ```bash
    cp .env.example .env
    ```
 
-3. Start everything:
+   Set `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`. For production behind
+   Cloudflare, also set `PUBLIC_BASE_URL` to your public site origin.
+
+3. Run:
 
    ```bash
    docker compose up --build -d
    ```
 
-   Frontend: http://localhost:3000 — API: http://localhost:8080
+4. Open http://localhost:3000
+
+   - **Upload** — drag-and-drop / browse
+   - **Files** — uploads saved in this browser (`localStorage`)
+   - **API** — HTTP reference for the same origin
+
+The Go API is not published on the host. Next.js rewrites `/api/*`, `/f/*`, and
+`/readyz` to it, so the browser and scripts use one origin (ready for Cloudflare).
 
 ## Development
 
 ```bash
-# API (needs DATABASE_URL, VALKEY_URL, DISCORD_* env vars)
+# API (requires DATABASE_URL, VALKEY_URL, DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID)
 go run ./cmd/discloud
 
-# Frontend (proxies /api and /f to localhost:8080)
-cd web && npm install && npm run dev
+# Web (proxies /api and /f to http://localhost:8080)
+cd web && pnpm install && pnpm run dev
 
-# Tests and checks
+# Checks
 go vet ./... && go test ./...
-cd web && npm run lint && npx tsc --noEmit
+cd web && pnpm run lint && pnpm exec tsc --noEmit
 ```
+
+Useful make targets: `make up`, `make down`, `make test`, `make snapshot`.
 
 ## API
 
-| Method | Path                  | Description                                             |
-| ------ | --------------------- | ------------------------------------------------------- |
-| POST   | `/api/upload?fileName=` | Streaming upload; body is the raw file bytes           |
-| GET    | `/f/{id}[/{name}]`    | Download; supports `Range` and `?download=1`            |
-| GET    | `/api/files`          | Recent uploads                                          |
-| GET    | `/api/files/{id}`     | File metadata                                           |
-| GET    | `/healthz` / `/readyz`| Liveness / readiness (pings PostgreSQL and Valkey)      |
+All paths are relative to the site origin (e.g. `http://localhost:3000` or your
+domain). Full examples live on the in-app **API** page (`/docs`).
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/upload?fileName=` | Stream whole file (raw body) |
+| `GET` / `HEAD` | `/api/chunks/{sha256}` | Chunk already stored? |
+| `POST` | `/api/chunks` | Upload one chunk (max 8 MB) |
+| `POST` | `/api/upload/complete` | Assemble file from chunk hashes |
+| `GET` | `/f/{id}[/{name}]` | Download (`Range`, `?download=1`) |
+| `GET` | `/api/files` | List recent files (server) |
+| `GET` | `/api/files/{id}` | File metadata |
+| `GET` | `/healthz`, `/readyz` | Liveness / readiness |
+
+The web UI uses the chunked flow (8 MB pieces, SHA-256 skip if present) so
+uploads stay under proxy body limits and retries resume without re-sending
+chunks already on the server.
+
+```bash
+BASE=http://localhost:3000
+
+# Small file
+curl -X POST --data-binary @file.bin "$BASE/api/upload?fileName=file.bin"
+
+# Download
+curl -OJ "$BASE/f/<fileId>?download=1"
+```
 
 ## Configuration
 
-| Variable             | Required | Description                                  |
-| -------------------- | -------- | -------------------------------------------- |
-| `DISCORD_BOT_TOKEN`  | yes      | Bot token used to post chunks                 |
-| `DISCORD_CHANNEL_ID` | yes      | Channel that stores the chunks                |
-| `DATABASE_URL`       | yes      | PostgreSQL connection string                  |
-| `VALKEY_URL`         | yes      | Valkey address (`valkey://host:port`)         |
-| `PORT`               | no       | API listen port (default `8080`)              |
-| `PUBLIC_BASE_URL`    | no       | Origin used in generated share links          |
-| `API_URL`            | no       | (frontend) API origin for rewrites/SSR fetches |
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DISCORD_BOT_TOKEN` | yes | Bot token(s); comma-separated list divides uploads across bots |
+| `DISCORD_CHANNEL_ID` | yes | Channel that holds chunks |
+| `PUBLIC_BASE_URL` | no | Share-link origin (Compose default: `http://localhost:3000`) |
+| `POSTGRES_PASSWORD` | no | Compose Postgres password (default: `discloud`) |
+| `DATABASE_URL` | yes\* | Postgres URL (\*set by Compose) |
+| `VALKEY_URL` | yes\* | Valkey URL (\*set by Compose) |
+| `PORT` | no | API listen port (default `8080`) |
+| `API_URL` | no | Web → API origin for rewrites (Compose: `http://api:8080`) |
+
+See [`.env.example`](.env.example).
 
 ## Releases
 
-Tagging `v*` triggers GoReleaser: cross-platform binaries (linux/darwin/windows,
-amd64/arm64), checksums, a grouped changelog, and multi-arch API images pushed
-to GHCR, plus a multi-arch frontend image.
+Push a `v*` tag to run GoReleaser: cross-platform binaries, checksums, changelog,
+and multi-arch images on GHCR for the API and web.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). By participating you agree to the
+[Code of Conduct](CODE_OF_CONDUCT.md). Security reports: [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © mewisme

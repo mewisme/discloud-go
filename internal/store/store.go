@@ -132,6 +132,52 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 	return f, err
 }
 
+// Chunk is one entry in the content-addressed chunk store.
+type Chunk struct {
+	Hash      string
+	MessageID string
+	Size      int64
+}
+
+// HasChunk reports whether a chunk with this hash was already uploaded.
+func (s *Store) HasChunk(ctx context.Context, hash string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM chunk_store WHERE hash = $1)`, hash).Scan(&exists)
+	return exists, err
+}
+
+// PutChunk records an uploaded chunk; concurrent duplicate uploads are benign.
+func (s *Store) PutChunk(ctx context.Context, c Chunk) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO chunk_store (hash, message_id, size) VALUES ($1, $2, $3) ON CONFLICT (hash) DO NOTHING`,
+		c.Hash, c.MessageID, c.Size)
+	return err
+}
+
+// GetChunks resolves hashes to stored chunks; missing hashes are absent from
+// the returned map.
+func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chunk, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT hash, message_id, size FROM chunk_store WHERE hash = ANY($1)`, hashes)
+	if err != nil {
+		return nil, err
+	}
+	chunks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Chunk, error) {
+		var c Chunk
+		err := row.Scan(&c.Hash, &c.MessageID, &c.Size)
+		return c, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Chunk, len(chunks))
+	for _, c := range chunks {
+		out[c.Hash] = c
+	}
+	return out, nil
+}
+
 func (s *Store) ListFiles(ctx context.Context, limit int) ([]File, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, size, chunk_size, created_at FROM files ORDER BY created_at DESC LIMIT $1`, limit)

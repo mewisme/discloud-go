@@ -89,8 +89,9 @@ func (f *fakeDiscord) messageJSON(id string) map[string]any {
 }
 
 type memStore struct {
-	mu    sync.Mutex
-	files map[string]store.File
+	mu     sync.Mutex
+	files  map[string]store.File
+	chunks map[string]store.Chunk
 }
 
 func (m *memStore) CreateFile(_ context.Context, f store.File) error {
@@ -121,6 +122,34 @@ func (m *memStore) ListFiles(_ context.Context, limit int) ([]store.File, error)
 		files = files[:limit]
 	}
 	return files, nil
+}
+
+func (m *memStore) HasChunk(_ context.Context, hash string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.chunks[hash]
+	return ok, nil
+}
+
+func (m *memStore) PutChunk(_ context.Context, c store.Chunk) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.chunks[c.Hash]; !ok {
+		m.chunks[c.Hash] = c
+	}
+	return nil
+}
+
+func (m *memStore) GetChunks(_ context.Context, hashes []string) (map[string]store.Chunk, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]store.Chunk{}
+	for _, h := range hashes {
+		if c, ok := m.chunks[h]; ok {
+			out[h] = c
+		}
+	}
+	return out, nil
 }
 
 func (m *memStore) Ping(context.Context) error { return nil }
@@ -155,7 +184,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *fakeDiscord, *memCache) {
 	dc.BaseURL = discordTS.URL
 	ca := &memCache{urls: map[string]string{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := New(log, &memStore{files: map[string]store.File{}}, ca, dc, "")
+	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, "")
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fake, ca

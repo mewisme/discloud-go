@@ -4,12 +4,15 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
-	Port             string
-	DatabaseURL      string
-	ValkeyURL        string
+	Port        string
+	DatabaseURL string
+	ValkeyURL   string
+	// DiscordBotToken is the raw env value: one token, or comma-separated
+	// tokens that divide uploads across bots.
 	DiscordBotToken  string
 	DiscordChannelID string
 	// PublicBaseURL is used to build share links. When empty, links are
@@ -22,7 +25,7 @@ func Load() (Config, error) {
 		Port:             getenv("PORT", "8080"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		ValkeyURL:        os.Getenv("VALKEY_URL"),
-		DiscordBotToken:  os.Getenv("DISCORD_BOT_TOKEN"),
+		DiscordBotToken:  strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
 		DiscordChannelID: os.Getenv("DISCORD_CHANNEL_ID"),
 		PublicBaseURL:    os.Getenv("PUBLIC_BASE_URL"),
 	}
@@ -36,7 +39,19 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("missing required environment variable %s", name)
 		}
 	}
+	if !hasToken(c.DiscordBotToken) {
+		return Config{}, fmt.Errorf("DISCORD_BOT_TOKEN has no usable tokens")
+	}
 	return c, nil
+}
+
+func hasToken(s string) bool {
+	for _, p := range strings.Split(s, ",") {
+		if strings.TrimSpace(p) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func getenv(key, fallback string) string {
