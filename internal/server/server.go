@@ -21,6 +21,7 @@ type Store interface {
 	PutChunk(ctx context.Context, c store.Chunk) error
 	GetChunks(ctx context.Context, hashes []string) (map[string]store.Chunk, error)
 	DeleteChunksByMessageID(ctx context.Context, messageID string) error
+	EnsureBots(ctx context.Context, count int) error
 	Ping(ctx context.Context) error
 }
 

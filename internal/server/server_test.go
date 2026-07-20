@@ -163,6 +163,8 @@ func (m *memStore) DeleteChunksByMessageID(_ context.Context, messageID string) 
 	return nil
 }
 
+func (m *memStore) EnsureBots(context.Context, int) error { return nil }
+
 func (m *memStore) Ping(context.Context) error { return nil }
 
 type memCache struct {

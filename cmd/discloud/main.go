@@ -55,6 +55,9 @@ func run(log *slog.Logger) error {
 	defer ca.Close()
 
 	dc := discord.New(cfg.DiscordBotToken, cfg.DiscordChannelID)
+	if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
+		return err
+	}
 	srv := server.New(log, st, ca, dc, cfg.PublicBaseURL)
 
 	httpServer := &http.Server{

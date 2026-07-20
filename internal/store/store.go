@@ -18,15 +18,20 @@ var migrationsFS embed.FS
 // ErrNotFound is returned when a file id does not exist.
 var ErrNotFound = errors.New("file not found")
 
-// File is a stored file: its metadata plus the ordered Discord message ids
-// holding each chunk.
+// FilePart is one Discord attachment that makes up a stored file.
+type FilePart struct {
+	MessageID string
+	BotID     int // token slot; -1 if unknown (legacy)
+}
+
+// File is a stored file: its metadata plus the ordered Discord parts.
 type File struct {
-	ID         string    `json:"fileId"`
-	Name       string    `json:"fileName"`
-	Size       int64     `json:"fileSize"`
-	ChunkSize  int64     `json:"chunkSize"`
-	CreatedAt  time.Time `json:"createdAt"`
-	MessageIDs []string  `json:"-"`
+	ID        string     `json:"fileId"`
+	Name      string     `json:"fileName"`
+	Size      int64      `json:"fileSize"`
+	ChunkSize int64      `json:"chunkSize"`
+	CreatedAt time.Time  `json:"createdAt"`
+	Parts     []FilePart `json:"-"`
 }
 
 type Store struct {
@@ -88,6 +93,17 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return nil
 }
 
+// EnsureBots upserts bot rows for token slots 0..count-1.
+func (s *Store) EnsureBots(ctx context.Context, count int) error {
+	for id := 0; id < count; id++ {
+		if _, err := s.pool.Exec(ctx,
+			`INSERT INTO bots (id) VALUES ($1) ON CONFLICT (id) DO NOTHING`, id); err != nil {
+			return fmt.Errorf("ensure bot %d: %w", id, err)
+		}
+	}
+	return nil
+}
+
 // CreateFile inserts the file row and its chunk rows in one transaction.
 func (s *Store) CreateFile(ctx context.Context, f File) error {
 	tx, err := s.pool.Begin(ctx)
@@ -101,12 +117,16 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 		f.ID, f.Name, f.Size, f.ChunkSize, f.CreatedAt); err != nil {
 		return fmt.Errorf("insert file: %w", err)
 	}
-	rows := make([][]any, len(f.MessageIDs))
-	for i, msgID := range f.MessageIDs {
-		rows[i] = []any{f.ID, i, msgID}
+	rows := make([][]any, len(f.Parts))
+	for i, p := range f.Parts {
+		var bot any
+		if p.BotID >= 0 {
+			bot = p.BotID
+		}
+		rows[i] = []any{f.ID, i, p.MessageID, bot}
 	}
 	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"chunks"},
-		[]string{"file_id", "idx", "message_id"}, pgx.CopyFromRows(rows)); err != nil {
+		[]string{"file_id", "idx", "message_id", "bot_id"}, pgx.CopyFromRows(rows)); err != nil {
 		return fmt.Errorf("insert chunks: %w", err)
 	}
 	return tx.Commit(ctx)
@@ -124,11 +144,23 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 		return File{}, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT message_id FROM chunks WHERE file_id = $1 ORDER BY idx`, id)
+		`SELECT message_id, bot_id FROM chunks WHERE file_id = $1 ORDER BY idx`, id)
 	if err != nil {
 		return File{}, err
 	}
-	f.MessageIDs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	f.Parts, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (FilePart, error) {
+		var p FilePart
+		var bot *int
+		if err := row.Scan(&p.MessageID, &bot); err != nil {
+			return FilePart{}, err
+		}
+		if bot != nil {
+			p.BotID = *bot
+		} else {
+			p.BotID = -1
+		}
+		return p, nil
+	})
 	return f, err
 }
 
@@ -136,6 +168,7 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 type Chunk struct {
 	Hash      string
 	MessageID string
+	BotID     int // token slot; -1 if unknown
 	Size      int64
 }
 
@@ -149,15 +182,17 @@ func (s *Store) HasChunk(ctx context.Context, hash string) (bool, error) {
 
 // PutChunk records an uploaded chunk; concurrent duplicate uploads are benign.
 func (s *Store) PutChunk(ctx context.Context, c Chunk) error {
+	var bot any
+	if c.BotID >= 0 {
+		bot = c.BotID
+	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO chunk_store (hash, message_id, size) VALUES ($1, $2, $3) ON CONFLICT (hash) DO NOTHING`,
-		c.Hash, c.MessageID, c.Size)
+		`INSERT INTO chunk_store (hash, message_id, bot_id, size) VALUES ($1, $2, $3, $4) ON CONFLICT (hash) DO NOTHING`,
+		c.Hash, c.MessageID, bot, c.Size)
 	return err
 }
 
-// DeleteChunksByMessageID drops content-addressed rows pointing at a Discord
-// message. Used when Discord no longer has the attachment so the next upload
-// re-POSTs bytes instead of reusing a dead ref.
+// DeleteChunksByMessageID drops content-addressed rows for a Discord message.
 func (s *Store) DeleteChunksByMessageID(ctx context.Context, messageID string) error {
 	_, err := s.pool.Exec(ctx,
 		`DELETE FROM chunk_store WHERE message_id = $1`, messageID)
@@ -168,14 +203,23 @@ func (s *Store) DeleteChunksByMessageID(ctx context.Context, messageID string) e
 // the returned map.
 func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chunk, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT hash, message_id, size FROM chunk_store WHERE hash = ANY($1)`, hashes)
+		`SELECT hash, message_id, bot_id, size FROM chunk_store WHERE hash = ANY($1)`, hashes)
 	if err != nil {
 		return nil, err
 	}
 	chunks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Chunk, error) {
 		var c Chunk
-		err := row.Scan(&c.Hash, &c.MessageID, &c.Size)
-		return c, err
+		var bot *int
+		err := row.Scan(&c.Hash, &c.MessageID, &bot, &c.Size)
+		if err != nil {
+			return Chunk{}, err
+		}
+		if bot != nil {
+			c.BotID = *bot
+		} else {
+			c.BotID = -1
+		}
+		return c, nil
 	})
 	if err != nil {
 		return nil, err

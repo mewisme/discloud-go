@@ -77,7 +77,7 @@ func (s *Server) handleChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.PutChunk(r.Context(), store.Chunk{
-		Hash: hash, MessageID: msgID, Size: int64(len(data)),
+		Hash: hash, MessageID: msgID.MessageID, BotID: msgID.BotID, Size: int64(len(data)),
 	}); err != nil {
 		s.log.Error("chunk persist failed", "hash", hash, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist chunk")
@@ -120,7 +120,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 
 	// Range math requires every chunk except the last to be exactly chunkSize.
 	var fileSize int64
-	messageIDs := make([]string, len(req.ChunkHashes))
+	parts := make([]store.FilePart, len(req.ChunkHashes))
 	for i, h := range req.ChunkHashes {
 		c, ok := known[h]
 		if !ok {
@@ -133,16 +133,16 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fileSize += c.Size
-		messageIDs[i] = c.MessageID
+		parts[i] = store.FilePart{MessageID: c.MessageID, BotID: c.BotID}
 	}
 
 	f := store.File{
-		ID:         newID(),
-		Name:       formatFileName(req.FileName),
-		Size:       fileSize,
-		ChunkSize:  chunkSize,
-		CreatedAt:  time.Now().UTC(),
-		MessageIDs: messageIDs,
+		ID:        newID(),
+		Name:      formatFileName(req.FileName),
+		Size:      fileSize,
+		ChunkSize: chunkSize,
+		CreatedAt: time.Now().UTC(),
+		Parts:     parts,
 	}
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		s.log.Error("persist file failed", "file", f.Name, "error", err)
@@ -151,7 +151,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	base := s.baseURL(r)
-	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(fileSize), "chunks", len(messageIDs))
+	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(fileSize), "chunks", len(parts))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"fileId":          f.ID,
 		"fileName":        f.Name,

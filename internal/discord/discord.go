@@ -76,43 +76,70 @@ type message struct {
 	} `json:"attachments"`
 }
 
-// UploadChunk posts data as a message attachment and returns the message id.
-// Successive calls rotate across configured bot tokens.
-func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) (string, error) {
+// UploadResult is a Discord message attachment written by one bot token.
+type UploadResult struct {
+	MessageID string
+	BotID     int // token slot index (matches store.bots.id)
+}
+
+// UploadChunk posts data as a message attachment. Successive calls rotate
+// across configured bot tokens.
+func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) (UploadResult, error) {
 	if len(c.bots) == 0 {
-		return "", fmt.Errorf("discord: no bot tokens configured")
+		return UploadResult{}, fmt.Errorf("discord: no bot tokens configured")
 	}
-	b := c.bots[c.next.Add(1)%uint64(len(c.bots))]
+	botID := int(c.next.Add(1) % uint64(len(c.bots)))
+	b := c.bots[botID]
 
 	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
 		msg, retryAfter, err := c.postAttachment(ctx, b, fileName, data)
 		if err == nil {
 			if len(msg.Attachments) == 0 {
-				return "", fmt.Errorf("discord: message %s has no attachments", msg.ID)
+				return UploadResult{}, fmt.Errorf("discord: message %s has no attachments", msg.ID)
 			}
-			return msg.ID, nil
+			return UploadResult{MessageID: msg.ID, BotID: botID}, nil
 		}
 		if retryAfter <= 0 || attempt >= maxAttempts {
-			return "", err
+			return UploadResult{}, err
 		}
 		b.backoff(retryAfter)
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return UploadResult{}, ctx.Err()
 		case <-time.After(b.sleepFor()):
 		}
 	}
 }
 
 // AttachmentURL fetches the message and returns its first attachment URL,
-// which Discord re-signs with a fresh expiry on every read. One message holds
-// one attachment; any configured bot that can see the channel may perform the read.
-func (c *Client) AttachmentURL(ctx context.Context, messageID string) (string, error) {
+// which Discord re-signs with a fresh expiry on every read.
+//
+// botID is the token slot that uploaded the file (other apps in the channel
+// usually see an empty attachments array). Pass botID < 0 to try every token
+// (legacy rows without a bot_id).
+func (c *Client) AttachmentURL(ctx context.Context, messageID string, botID int) (string, error) {
 	if len(c.bots) == 0 {
 		return "", fmt.Errorf("discord: no bot tokens configured")
 	}
-	b := c.bots[0]
+	if botID >= 0 {
+		if botID >= len(c.bots) {
+			return "", fmt.Errorf("discord: bot id %d out of range (%d tokens)", botID, len(c.bots))
+		}
+		return c.attachmentURLWith(ctx, c.bots[botID], messageID)
+	}
+	var lastErr error
+	for _, b := range c.bots {
+		url, err := c.attachmentURLWith(ctx, b, messageID)
+		if err == nil {
+			return url, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
+func (c *Client) attachmentURLWith(ctx context.Context, b *bot, messageID string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		fmt.Sprintf("%s/channels/%s/messages/%s", c.BaseURL, c.ChannelID, messageID), nil)
 	if err != nil {
