@@ -18,7 +18,7 @@ URLs (cached in Valkey).
    ```
 
    Set `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`. Behind Cloudflare, also set
-   `PUBLIC_BASE_URL` to your public API origin (share links).
+   `PUBLIC_BASE_URL` to your public **API** origin (not the `:3000` UI).
 
 3. Run:
 
@@ -36,14 +36,14 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
 
 The API is published on **:8080**. Point Cloudflare at it for `/api/*`, `/f/*`,
-and `/readyz`. The web UI on **:3000** calls that origin directly (set
-`PUBLIC_BASE_URL` / web `API_URL` to the browser-reachable API URL).
+and `/readyz`. The web UI on **:3000** calls that origin via runtime
+`PUBLIC_BASE_URL` (no rebuild — recreate the web container after changing it).
 
 ## Development
 
 ```bash
 go run ./cmd/discloud          # needs DATABASE_URL, VALKEY_URL, Discord env
-cd web && pnpm i && pnpm dev  # talks to API at NEXT_PUBLIC_API_URL / :8080
+cd web && pnpm i && pnpm dev  # PUBLIC_BASE_URL in web/.env.local (default :8080)
 ```
 
 ```bash
@@ -78,7 +78,7 @@ curl -OJ "$BASE/f/<fileId>?download=1"
 | --- | --- |
 | `DISCORD_BOT_TOKEN` | Required. Comma-separated tokens → parallel Discord uploads (one worker per bot) |
 | `DISCORD_CHANNEL_ID` | Required. Channel that holds chunks |
-| `PUBLIC_BASE_URL` | Share-link origin (Compose default `http://localhost:8080`) |
+| `PUBLIC_BASE_URL` | Public API origin for share links and the web UI (default `http://localhost:8080`). Recreate api+web after change — no image rebuild |
 | `DISCLOUD_TAG` | Image tag (default `latest`) |
 | `POSTGRES_PASSWORD` | Compose DB password (default `discloud`) |
 

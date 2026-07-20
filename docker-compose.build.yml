@@ -13,5 +13,3 @@ services:
     pull_policy: build
     build:
       context: web
-      args:
-        NEXT_PUBLIC_API_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}

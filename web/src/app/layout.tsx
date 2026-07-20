@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
+import { connection } from "next/server";
 import { Cloud } from "lucide-react";
 import { Toaster } from "sonner";
 
@@ -25,15 +26,14 @@ export const metadata: Metadata = {
   description: "Unlimited cloud storage backed by Discord attachments.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await connection();
   const apiOrigin = (
-    process.env.API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:8080"
+    process.env.PUBLIC_BASE_URL || "http://localhost:8080"
   ).replace(/\/$/, "");
 
   return (

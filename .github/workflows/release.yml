@@ -75,8 +75,6 @@ jobs:
           cache-to: |
             type=gha,mode=max,scope=discloud-web-${{ matrix.digest_name }}
             type=registry,ref=ghcr.io/${{ github.repository_owner }}/discloud-web:buildcache-${{ matrix.digest_name }},mode=max
-          build-args: |
-            NEXT_PUBLIC_API_URL=http://localhost:8080
       - name: Export digest
         run: |
           mkdir -p "${{ runner.temp }}/digests"
