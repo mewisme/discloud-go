@@ -3,9 +3,8 @@ name: discloud
 services:
   api:
     container_name: discloud-api
-    build:
-      context: .
-      dockerfile: Dockerfile.api
+    image: ghcr.io/mewisme/discloud:${DISCLOUD_TAG:-latest}
+    pull_policy: always
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://discloud:${POSTGRES_PASSWORD:-discloud}@postgres:5432/discloud
@@ -32,10 +31,8 @@ services:
 
   web:
     container_name: discloud-web
-    build:
-      context: web
-      args:
-        API_URL: http://api:8080
+    image: ghcr.io/mewisme/discloud-web:${DISCLOUD_TAG:-latest}
+    pull_policy: always
     environment:
       API_URL: http://api:8080
       NODE_OPTIONS: --max-old-space-size=192

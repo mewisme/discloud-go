@@ -1,4 +1,4 @@
-.PHONY: run test lint build web-dev web-build up down snapshot
+.PHONY: run test lint build web-dev web-build up up-build down snapshot
 
 run: ## Run the API (needs env vars, see .env.example)
 	go run ./cmd/discloud
@@ -21,7 +21,10 @@ web-build:
 	cd web && pnpm run build
 
 up:
-	docker compose up --build -d
+	docker compose up -d
+
+up-build:
+	docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 
 down:
 	docker compose down

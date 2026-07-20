@@ -29,10 +29,17 @@ cached in Valkey so share links stay valid.
    Set `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`. For production behind
    Cloudflare, also set `PUBLIC_BASE_URL` to your public site origin.
 
-3. Run:
+3. Run (pulls published images from GHCR):
 
    ```bash
-   docker compose up --build -d
+   docker compose up -d
+   ```
+
+   Optional: set `DISCLOUD_TAG=v0.0.2` in `.env` to pin a release (default
+   `latest`). Build from source instead:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
    ```
 
 4. Open http://localhost:3000
