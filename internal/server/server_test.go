@@ -26,45 +26,83 @@ import (
 // CDN, all in one httptest server.
 type fakeDiscord struct {
 	mu       sync.Mutex
-	messages map[string][]byte // message id -> chunk bytes
+	messages map[string][][]byte // message id -> attachment payloads
 	nextID   int
 	baseURL  string
-	uploads  int
+	uploads  int // Discord create-message POSTs
 }
 
 func newFakeDiscord(t *testing.T) (*fakeDiscord, *httptest.Server) {
-	f := &fakeDiscord{messages: map[string][]byte{}}
+	f := &fakeDiscord{messages: map[string][][]byte{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /channels/{ch}/messages", func(w http.ResponseWriter, r *http.Request) {
-		file, _, err := r.FormFile("files[0]")
-		if err != nil {
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
 			t.Errorf("fake discord: bad multipart: %v", err)
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		data, _ := io.ReadAll(file)
+		var parts [][]byte
+		for i := 0; ; i++ {
+			file, _, err := r.FormFile(fmt.Sprintf("files[%d]", i))
+			if err != nil {
+				break
+			}
+			data, _ := io.ReadAll(file)
+			parts = append(parts, data)
+			_ = file.Close()
+		}
+		if len(parts) == 0 {
+			t.Error("fake discord: no files")
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
 		f.mu.Lock()
 		f.nextID++
 		id := strconv.Itoa(f.nextID)
-		f.messages[id] = data
+		f.messages[id] = parts
 		f.uploads++
 		f.mu.Unlock()
-		json.NewEncoder(w).Encode(f.messageJSON(id))
+		json.NewEncoder(w).Encode(f.messageJSON(id, len(parts)))
 	})
 	mux.HandleFunc("GET /channels/{ch}/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		f.mu.Lock()
-		_, ok := f.messages[id]
+		parts, ok := f.messages[id]
+		n := len(parts)
 		f.mu.Unlock()
 		if !ok {
 			http.Error(w, "unknown message", http.StatusNotFound)
 			return
 		}
-		json.NewEncoder(w).Encode(f.messageJSON(id))
+		json.NewEncoder(w).Encode(f.messageJSON(id, n))
 	})
+	mux.HandleFunc("GET /attachments/{id}/{idx}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		parts, ok := f.messages[r.PathValue("id")]
+		idx, _ := strconv.Atoi(r.PathValue("idx"))
+		var data []byte
+		if ok && idx >= 0 && idx < len(parts) {
+			data = parts[idx]
+		} else {
+			ok = false
+		}
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "gone", http.StatusNotFound)
+			return
+		}
+		http.ServeContent(w, r, "chunk", time.Time{}, bytes.NewReader(data))
+	})
+	// Legacy single-attachment URL shape used by older test helpers.
 	mux.HandleFunc("GET /attachments/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		data, ok := f.messages[r.PathValue("id")]
+		parts, ok := f.messages[r.PathValue("id")]
+		var data []byte
+		if ok && len(parts) > 0 {
+			data = parts[0]
+		} else {
+			ok = false
+		}
 		f.mu.Unlock()
 		if !ok {
 			http.Error(w, "gone", http.StatusNotFound)
@@ -78,13 +116,17 @@ func newFakeDiscord(t *testing.T) (*fakeDiscord, *httptest.Server) {
 	return f, ts
 }
 
-func (f *fakeDiscord) messageJSON(id string) map[string]any {
+func (f *fakeDiscord) messageJSON(id string, n int) map[string]any {
 	ex := strconv.FormatInt(time.Now().Add(24*time.Hour).Unix(), 16)
+	atts := make([]map[string]string, n)
+	for i := 0; i < n; i++ {
+		atts[i] = map[string]string{
+			"url": fmt.Sprintf("%s/attachments/%s/%d?ex=%s", f.baseURL, id, i, ex),
+		}
+	}
 	return map[string]any{
-		"id": id,
-		"attachments": []map[string]string{
-			{"url": fmt.Sprintf("%s/attachments/%s?ex=%s", f.baseURL, id, ex)},
-		},
+		"id":          id,
+		"attachments": atts,
 	}
 }
 
@@ -262,8 +304,8 @@ func TestUploadDownloadRoundTrip(t *testing.T) {
 	if up.FileName != "round-trip.bin" {
 		t.Errorf("fileName = %q, want %q", up.FileName, "round-trip.bin")
 	}
-	if fake.uploads != 3 {
-		t.Errorf("discord uploads = %d, want 3", fake.uploads)
+	if fake.uploads != 1 {
+		t.Errorf("discord uploads = %d, want 1 (3 chunks batched)", fake.uploads)
 	}
 
 	// Full download must be byte-identical.

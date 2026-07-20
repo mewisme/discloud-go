@@ -7,6 +7,7 @@ package server
 // from the ordered hash list. Retried uploads skip chunks that already exist.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/mewisme/discloud-go/internal/discord"
 	"github.com/mewisme/discloud-go/internal/store"
 )
 
@@ -56,34 +58,107 @@ func (s *Server) handleChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sum := sha256.Sum256(data)
-	hash := hex.EncodeToString(sum[:])
-
-	exists, err := s.store.HasChunk(r.Context(), hash)
+	out, err := s.storeChunks(r.Context(), [][]byte{data})
 	if err != nil {
-		s.log.Error("chunk lookup failed", "hash", hash, "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if exists {
-		writeJSON(w, http.StatusOK, map[string]any{"hash": hash, "existed": true})
-		return
-	}
-
-	msgID, err := s.discord.UploadChunk(r.Context(), "chunk-"+hash[:16], data)
-	if err != nil {
-		s.log.Error("chunk upload failed", "hash", hash, "error", err)
+		s.log.Error("chunk upload failed", "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Upload failed")
 		return
 	}
-	if err := s.store.PutChunk(r.Context(), store.Chunk{
-		Hash: hash, MessageID: msgID, Size: int64(len(data)),
-	}); err != nil {
-		s.log.Error("chunk persist failed", "hash", hash, "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "Failed to persist chunk")
+	writeJSON(w, http.StatusOK, out[0])
+}
+
+// handleChunkBatch stores up to discord.MaxAttachments chunks in one Discord
+// message when they are new. Multipart field names: files[0]…files[n-1].
+func (s *Server) handleChunkBatch(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, int64(discord.MaxAttachments)*chunkSize+1<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid multipart body")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"hash": hash, "existed": false})
+	var blobs [][]byte
+	for i := 0; i < discord.MaxAttachments; i++ {
+		file, _, err := r.FormFile(fmt.Sprintf("files[%d]", i))
+		if err != nil {
+			break
+		}
+		data, err := io.ReadAll(io.LimitReader(file, chunkSize+1))
+		_ = file.Close()
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "Failed to read chunk")
+			return
+		}
+		if len(data) == 0 || len(data) > chunkSize {
+			writeJSONError(w, http.StatusBadRequest,
+				fmt.Sprintf("Each chunk must be 1..%d bytes", chunkSize))
+			return
+		}
+		blobs = append(blobs, data)
+	}
+	if len(blobs) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "No chunks in request")
+		return
+	}
+
+	out, err := s.storeChunks(r.Context(), blobs)
+	if err != nil {
+		s.log.Error("chunk batch failed", "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Upload failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chunks": out})
+}
+
+type chunkUploadResult struct {
+	Hash    string `json:"hash"`
+	Existed bool   `json:"existed"`
+}
+
+// storeChunks content-addresses blobs, uploading only missing ones to Discord
+// in a single multi-attachment message when possible.
+func (s *Server) storeChunks(ctx context.Context, blobs [][]byte) ([]chunkUploadResult, error) {
+	out := make([]chunkUploadResult, len(blobs))
+	type miss struct {
+		i    int
+		hash string
+		data []byte
+	}
+	var missing []miss
+
+	for i, data := range blobs {
+		sum := sha256.Sum256(data)
+		hash := hex.EncodeToString(sum[:])
+		exists, err := s.store.HasChunk(ctx, hash)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			out[i] = chunkUploadResult{Hash: hash, Existed: true}
+			continue
+		}
+		missing = append(missing, miss{i: i, hash: hash, data: data})
+	}
+
+	if len(missing) == 0 {
+		return out, nil
+	}
+
+	parts := make([]discord.Part, len(missing))
+	for j, m := range missing {
+		parts[j] = discord.Part{Name: "chunk-" + m.hash[:16], Data: m.data}
+	}
+	refs, err := s.discord.UploadParts(ctx, parts)
+	if err != nil {
+		return nil, err
+	}
+	for j, m := range missing {
+		if err := s.store.PutChunk(ctx, store.Chunk{
+			Hash: m.hash, MessageID: refs[j], Size: int64(len(m.data)),
+		}); err != nil {
+			return nil, err
+		}
+		out[m.i] = chunkUploadResult{Hash: m.hash, Existed: false}
+	}
+	return out, nil
 }
 
 // handleUploadComplete assembles a file from previously uploaded chunks.

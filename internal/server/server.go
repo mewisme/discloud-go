@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/chunks/{hash}", s.handleChunkCheck)
+	mux.HandleFunc("POST /api/chunks/batch", s.handleChunkBatch)
 	mux.HandleFunc("POST /api/chunks", s.handleChunkUpload)
 	mux.HandleFunc("POST /api/upload/complete", s.handleUploadComplete)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)

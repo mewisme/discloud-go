@@ -58,7 +58,7 @@ Use the site origin (`http://localhost:3000` or your domain). Full reference:
 | | |
 | --- | --- |
 | `POST /api/upload?fileName=` | Whole-file upload (raw body) |
-| `POST /api/chunks` · `GET/HEAD /api/chunks/{sha256}` | Chunked / resumable |
+| `POST /api/chunks` · `POST /api/chunks/batch` · `GET/HEAD /api/chunks/{sha256}` | Chunked / resumable (batch ≤10) |
 | `POST /api/upload/complete` | Assemble from chunk hashes |
 | `GET /f/{id}` | Download (`Range`, `?download=1`) |
 | `GET /api/files` · `/api/files/{id}` | List / metadata |

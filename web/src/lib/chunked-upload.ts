@@ -1,21 +1,18 @@
 import type { UploadResult } from "@/lib/api";
 
 /**
- * Chunked upload that stays under proxy body-size limits (Cloudflare caps
- * proxied requests at 100 MB): the file is split into 8 MB chunks matching
- * the server's storage chunk size, each chunk is SHA-256 hashed and skipped
- * if the server already has it, so retried uploads resume where they left off.
- *
- * Worker count comes from GET /api/info (matches Discord bot token count when
- * multiple tokens are configured).
+ * Chunked upload under proxy body-size limits: split into 8 MB pieces, skip
+ * chunks the server already has, upload missing ones in Discord-sized batches
+ * (up to 10 attachments per POST /api/chunks/batch).
  */
 const CHUNK_SIZE = 8 * 1024 * 1024;
+const BATCH_SIZE = 10;
 const DEFAULT_WORKERS = 3;
 const ATTEMPTS = 3;
 
 let workersPromise: Promise<number> | null = null;
 
-/** Parallel chunk POSTs — scales with Discord bot tokens on the server. */
+/** Parallel batch POSTs — scales with Discord bot tokens on the server. */
 export async function uploadWorkers(): Promise<number> {
   if (!workersPromise) {
     workersPromise = fetch("/api/info", { cache: "no-store" })
@@ -23,7 +20,9 @@ export async function uploadWorkers(): Promise<number> {
         if (!res.ok) return DEFAULT_WORKERS;
         const body = (await res.json()) as { workers?: unknown };
         const n = Number(body.workers);
-        return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 32) : DEFAULT_WORKERS;
+        return Number.isFinite(n) && n >= 1
+          ? Math.min(Math.floor(n), 32)
+          : DEFAULT_WORKERS;
       })
       .catch(() => DEFAULT_WORKERS);
   }
@@ -41,25 +40,72 @@ export async function uploadFileChunked(
 
   const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
   const hashes: string[] = new Array(chunkCount);
-  const loaded: number[] = new Array(chunkCount).fill(0);
-  const report = () =>
-    onProgress(loaded.reduce((a, b) => a + b, 0), file.size);
+  const missing: { idx: number; buf: ArrayBuffer; hash: string }[] = [];
 
   const workers = Math.min(await uploadWorkers(), chunkCount);
   let next = 0;
-  async function worker(): Promise<void> {
+  const presentBytes = new Array(chunkCount).fill(0);
+
+  async function hashWorker(): Promise<void> {
     while (next < chunkCount) {
       const idx = next++;
-      const blob = file.slice(idx * CHUNK_SIZE, Math.min((idx + 1) * CHUNK_SIZE, file.size));
-      hashes[idx] = await uploadChunkWithRetry(blob, (sent) => {
-        loaded[idx] = sent;
+      const blob = file.slice(
+        idx * CHUNK_SIZE,
+        Math.min((idx + 1) * CHUNK_SIZE, file.size),
+      );
+      const buf = await blob.arrayBuffer();
+      const hash = await sha256Hex(buf);
+      hashes[idx] = hash;
+      const check = await fetch(`/api/chunks/${hash}`, { method: "HEAD" });
+      if (!check.ok) {
+        missing.push({ idx, buf, hash });
+      } else {
+        presentBytes[idx] = buf.byteLength;
+        onProgress(
+          presentBytes.reduce((a: number, b: number) => a + b, 0),
+          file.size,
+        );
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, hashWorker));
+
+  // Stable order for complete; upload missing in batches of ≤10.
+  missing.sort((a, b) => a.idx - b.idx);
+  const batches: (typeof missing)[] = [];
+  for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+    batches.push(missing.slice(i, i + BATCH_SIZE));
+  }
+
+  const presentTotal = presentBytes.reduce((a: number, b: number) => a + b, 0);
+  const loadedExtra = new Array(batches.length).fill(0);
+  const report = () =>
+    onProgress(
+      presentTotal + loadedExtra.reduce((a: number, b: number) => a + b, 0),
+      file.size,
+    );
+
+  let batchNext = 0;
+  async function batchWorker(): Promise<void> {
+    while (batchNext < batches.length) {
+      const bi = batchNext++;
+      const batch = batches[bi];
+      await uploadBatchWithRetry(batch, (sent) => {
+        loadedExtra[bi] = sent;
         report();
       });
-      loaded[idx] = blob.size;
+      loadedExtra[bi] = batch.reduce((a, c) => a + c.buf.byteLength, 0);
       report();
     }
   }
-  await Promise.all(Array.from({ length: workers }, worker));
+  await Promise.all(
+    Array.from(
+      { length: Math.min(workers, Math.max(batches.length, 1)) },
+      batchWorker,
+    ),
+  );
+
+  onProgress(file.size, file.size);
 
   const res = await fetch("/api/upload/complete", {
     method: "POST",
@@ -72,51 +118,49 @@ export async function uploadFileChunked(
   return (await res.json()) as UploadResult;
 }
 
-async function uploadChunkWithRetry(
-  blob: Blob,
-  onChunkProgress: (sent: number) => void,
-): Promise<string> {
+async function uploadBatchWithRetry(
+  batch: { idx: number; buf: ArrayBuffer; hash: string }[],
+  onProgress: (sent: number) => void,
+): Promise<void> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
-      const buf = await blob.arrayBuffer();
-      const hash = await sha256Hex(buf);
-      // Skip the upload entirely if the server already has these bytes.
-      const check = await fetch(`/api/chunks/${hash}`, { method: "HEAD" });
-      if (check.ok) return hash;
-      return await postChunk(buf, onChunkProgress);
+      await postChunkBatch(
+        batch.map((c) => c.buf),
+        onProgress,
+      );
+      return;
     } catch (err) {
       lastError = err;
-      onChunkProgress(0);
+      onProgress(0);
       if (attempt < ATTEMPTS) {
         await new Promise((r) => setTimeout(r, 500 * attempt));
       }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Chunk upload failed");
+  throw lastError instanceof Error ? lastError : new Error("Chunk batch failed");
 }
 
-/** XHR instead of fetch purely for upload progress events. */
-function postChunk(
-  buf: ArrayBuffer,
-  onChunkProgress: (sent: number) => void,
-): Promise<string> {
+function postChunkBatch(
+  bufs: ArrayBuffer[],
+  onProgress: (sent: number) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    const form = new FormData();
+    bufs.forEach((buf, i) => {
+      form.append(`files[${i}]`, new Blob([buf]), `chunk-${i}.bin`);
+    });
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/chunks");
+    xhr.open("POST", "/api/chunks/batch");
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onChunkProgress(e.loaded);
+      if (e.lengthComputable) onProgress(e.loaded);
     };
     xhr.onload = () => {
-      if (xhr.status === 200) {
-        const body = JSON.parse(xhr.responseText) as { hash: string };
-        resolve(body.hash);
-      } else {
-        reject(new Error(`Chunk upload failed (${xhr.status})`));
-      }
+      if (xhr.status === 200) resolve();
+      else reject(new Error(`Chunk batch failed (${xhr.status})`));
     };
-    xhr.onerror = () => reject(new Error("Chunk upload failed: network error"));
-    xhr.send(buf);
+    xhr.onerror = () => reject(new Error("Chunk batch failed: network error"));
+    xhr.send(form);
   });
 }
 

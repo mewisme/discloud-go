@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/mewisme/discloud-go/internal/discord"
 	"github.com/mewisme/discloud-go/internal/store"
 )
 
@@ -51,32 +52,61 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	fileName := formatFileName(rawName)
 	fileID := newID()
 
+	type item struct {
+		idx  int
+		data []byte
+	}
 	var (
 		mu         sync.Mutex
 		messageIDs []string
+		batch      []item
 	)
 	g, ctx := errgroup.WithContext(r.Context())
 	g.SetLimit(s.discordUploadLimit())
 
-	fileSize, err := forEachChunk(r.Body, chunkSize, func(idx int, data []byte) error {
-		if ctx.Err() != nil { // an upload already failed; stop reading
-			return ctx.Err()
+	flush := func(items []item) {
+		if len(items) == 0 {
+			return
 		}
 		g.Go(func() error {
-			msgID, err := s.discord.UploadChunk(ctx, fmt.Sprintf("%s-chunk-%d", fileName, idx+1), data)
+			parts := make([]discord.Part, len(items))
+			for i, it := range items {
+				parts[i] = discord.Part{
+					Name: fmt.Sprintf("%s-chunk-%d", fileName, it.idx+1),
+					Data: it.data,
+				}
+			}
+			refs, err := s.discord.UploadParts(ctx, parts)
 			if err != nil {
 				return err
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			for len(messageIDs) <= idx {
-				messageIDs = append(messageIDs, "")
+			for i, it := range items {
+				for len(messageIDs) <= it.idx {
+					messageIDs = append(messageIDs, "")
+				}
+				messageIDs[it.idx] = refs[i]
 			}
-			messageIDs[idx] = msgID
 			return nil
 		})
+	}
+
+	fileSize, err := forEachChunk(r.Body, chunkSize, func(idx int, data []byte) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// Own the slice; forEachChunk allocates a fresh buffer each call.
+		cp := make([]byte, len(data))
+		copy(cp, data)
+		batch = append(batch, item{idx: idx, data: cp})
+		if len(batch) >= discord.MaxAttachments {
+			flush(batch)
+			batch = nil
+		}
 		return nil
 	})
+	flush(batch)
 	if uploadErr := g.Wait(); err == nil {
 		err = uploadErr
 	}

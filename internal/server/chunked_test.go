@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"testing"
@@ -190,5 +191,80 @@ func TestChunkedUploadValidation(t *testing.T) {
 	respRaw.Body.Close()
 	if respRaw.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized chunk: status = %d, want 413", respRaw.StatusCode)
+	}
+}
+
+func TestChunkBatchMultiAttach(t *testing.T) {
+	ts, fake, _ := newTestServer(t)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	blobs := [][]byte{[]byte("alpha-chunk"), []byte("bravo-chunk"), []byte("charlie-chk")}
+	for i, b := range blobs {
+		part, err := mw.CreateFormFile(fmt.Sprintf("files[%d]", i), fmt.Sprintf("c%d.bin", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/chunks/batch", mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("batch status = %d: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Chunks []chunkResp `json:"chunks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Chunks) != 3 {
+		t.Fatalf("chunks = %d, want 3", len(out.Chunks))
+	}
+	if fake.uploads != 1 {
+		t.Fatalf("discord POSTs = %d, want 1", fake.uploads)
+	}
+	for i, cr := range out.Chunks {
+		sum := sha256.Sum256(blobs[i])
+		want := hex.EncodeToString(sum[:])
+		if cr.Hash != want || cr.Existed {
+			t.Fatalf("chunk[%d]=%+v want hash %s existed=false", i, cr, want)
+		}
+	}
+
+	// Re-batch same payloads → no new Discord upload.
+	var buf2 bytes.Buffer
+	mw2 := multipart.NewWriter(&buf2)
+	for i, b := range blobs {
+		part, _ := mw2.CreateFormFile(fmt.Sprintf("files[%d]", i), fmt.Sprintf("c%d.bin", i))
+		_, _ = part.Write(b)
+	}
+	_ = mw2.Close()
+	resp2, err := http.Post(ts.URL+"/api/chunks/batch", mw2.FormDataContentType(), &buf2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var out2 struct {
+		Chunks []chunkResp `json:"chunks"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&out2)
+	if fake.uploads != 1 {
+		t.Fatalf("discord POSTs after redo = %d, want 1", fake.uploads)
+	}
+	for _, cr := range out2.Chunks {
+		if !cr.Existed {
+			t.Fatal("expected existed=true on redo")
+		}
 	}
 }

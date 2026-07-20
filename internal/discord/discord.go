@@ -1,5 +1,5 @@
 // Package discord is a minimal Discord bot API client covering the two
-// operations discloud needs: uploading a chunk as a message attachment and
+// operations discloud needs: uploading chunk(s) as message attachment(s) and
 // re-reading a message to get a fresh signed attachment URL.
 package discord
 
@@ -18,7 +18,11 @@ import (
 	"time"
 )
 
-const DefaultBaseURL = "https://discord.com/api/v10"
+const (
+	DefaultBaseURL = "https://discord.com/api/v10"
+	// MaxAttachments is Discord's per-message file limit.
+	MaxAttachments = 10
+)
 
 // bot is one Discord bot identity with its own rate-limit clock.
 type bot struct {
@@ -35,6 +39,12 @@ type Client struct {
 
 	bots []*bot
 	next atomic.Uint64 // round-robin index for uploads
+}
+
+// Part is one file to attach to a Discord message.
+type Part struct {
+	Name string
+	Data []byte
 }
 
 // New builds a client. token may be a single bot token or a comma-separated
@@ -69,6 +79,29 @@ func SplitTokens(s string) []string {
 // TokenCount is how many bots are available for upload distribution.
 func (c *Client) TokenCount() int { return len(c.bots) }
 
+// FormatRef builds a stored locator for a Discord attachment.
+// Index 0 stays a bare message id for backward compatibility with legacy rows.
+func FormatRef(messageID string, idx int) string {
+	if idx <= 0 {
+		return messageID
+	}
+	return messageID + ":" + strconv.Itoa(idx)
+}
+
+// ParseRef splits a locator into message id and attachment index.
+// Bare ids (no ":idx") mean attachment 0.
+func ParseRef(ref string) (messageID string, idx int) {
+	i := strings.LastIndex(ref, ":")
+	if i < 0 {
+		return ref, 0
+	}
+	n, err := strconv.Atoi(ref[i+1:])
+	if err != nil || n < 0 {
+		return ref, 0
+	}
+	return ref[:i], n
+}
+
 type message struct {
 	ID          string `json:"id"`
 	Attachments []struct {
@@ -76,42 +109,67 @@ type message struct {
 	} `json:"attachments"`
 }
 
-// UploadChunk posts data as a message attachment and returns the message id.
-// Successive calls rotate across configured bot tokens.
+// UploadChunk posts one attachment and returns a locator (bare message id).
 func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) (string, error) {
-	if len(c.bots) == 0 {
-		return "", fmt.Errorf("discord: no bot tokens configured")
+	refs, err := c.UploadParts(ctx, []Part{{Name: fileName, Data: data}})
+	if err != nil {
+		return "", err
 	}
-	b := c.bots[c.next.Add(1)%uint64(len(c.bots))]
+	return refs[0], nil
+}
 
+// UploadParts posts up to MaxAttachments files on one message and returns a
+// locator per part (messageID or messageID:idx). Successive calls rotate bots.
+func (c *Client) UploadParts(ctx context.Context, parts []Part) ([]string, error) {
+	if len(c.bots) == 0 {
+		return nil, fmt.Errorf("discord: no bot tokens configured")
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("discord: no parts to upload")
+	}
+	if len(parts) > MaxAttachments {
+		return nil, fmt.Errorf("discord: at most %d attachments per message", MaxAttachments)
+	}
+	for _, p := range parts {
+		if len(p.Data) == 0 {
+			return nil, fmt.Errorf("discord: empty part %q", p.Name)
+		}
+	}
+
+	b := c.bots[c.next.Add(1)%uint64(len(c.bots))]
 	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
-		msg, retryAfter, err := c.postAttachment(ctx, b, fileName, data)
+		msg, retryAfter, err := c.postAttachments(ctx, b, parts)
 		if err == nil {
-			if len(msg.Attachments) == 0 {
-				return "", fmt.Errorf("discord: message %s has no attachments", msg.ID)
+			if len(msg.Attachments) < len(parts) {
+				return nil, fmt.Errorf("discord: message %s has %d attachments, want %d",
+					msg.ID, len(msg.Attachments), len(parts))
 			}
-			return msg.ID, nil
+			refs := make([]string, len(parts))
+			for i := range parts {
+				refs[i] = FormatRef(msg.ID, i)
+			}
+			return refs, nil
 		}
 		if retryAfter <= 0 || attempt >= maxAttempts {
-			return "", err
+			return nil, err
 		}
 		b.backoff(retryAfter)
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		case <-time.After(b.sleepFor()):
 		}
 	}
 }
 
-// AttachmentURL fetches the message and returns its first attachment URL,
-// which Discord re-signs with a fresh expiry on every read. Any configured
-// bot that can see the channel may perform the read.
-func (c *Client) AttachmentURL(ctx context.Context, messageID string) (string, error) {
+// AttachmentURL fetches the message and returns the signed CDN URL for the
+// attachment described by ref (bare id or id:idx).
+func (c *Client) AttachmentURL(ctx context.Context, ref string) (string, error) {
 	if len(c.bots) == 0 {
 		return "", fmt.Errorf("discord: no bot tokens configured")
 	}
+	messageID, idx := ParseRef(ref)
 	b := c.bots[0]
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		fmt.Sprintf("%s/channels/%s/messages/%s", c.BaseURL, c.ChannelID, messageID), nil)
@@ -132,13 +190,13 @@ func (c *Client) AttachmentURL(ctx context.Context, messageID string) (string, e
 	if err := json.NewDecoder(resp.Body).Decode(&msg); err != nil {
 		return "", err
 	}
-	if len(msg.Attachments) == 0 {
-		return "", fmt.Errorf("discord: message %s has no attachments", messageID)
+	if idx < 0 || idx >= len(msg.Attachments) {
+		return "", fmt.Errorf("discord: message %s has no attachment %d", messageID, idx)
 	}
-	return msg.Attachments[0].URL, nil
+	return msg.Attachments[idx].URL, nil
 }
 
-func (c *Client) postAttachment(ctx context.Context, b *bot, fileName string, data []byte) (msg message, retryAfter time.Duration, err error) {
+func (c *Client) postAttachments(ctx context.Context, b *bot, parts []Part) (msg message, retryAfter time.Duration, err error) {
 	if d := b.sleepFor(); d > 0 {
 		select {
 		case <-ctx.Done():
@@ -147,15 +205,21 @@ func (c *Client) postAttachment(ctx context.Context, b *bot, fileName string, da
 		}
 	}
 
-	var body bytes.Buffer
-	body.Grow(len(data) + 512)
-	mw := multipart.NewWriter(&body)
-	part, err := mw.CreateFormFile("files[0]", fileName)
-	if err != nil {
-		return message{}, 0, err
+	var total int
+	for _, p := range parts {
+		total += len(p.Data)
 	}
-	if _, err = part.Write(data); err != nil {
-		return message{}, 0, err
+	var body bytes.Buffer
+	body.Grow(total + 512*len(parts))
+	mw := multipart.NewWriter(&body)
+	for i, p := range parts {
+		part, err := mw.CreateFormFile(fmt.Sprintf("files[%d]", i), p.Name)
+		if err != nil {
+			return message{}, 0, err
+		}
+		if _, err = part.Write(p.Data); err != nil {
+			return message{}, 0, err
+		}
 	}
 	if err = mw.Close(); err != nil {
 		return message{}, 0, err
@@ -181,7 +245,11 @@ func (c *Client) postAttachment(ctx context.Context, b *bot, fileName string, da
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return message{}, 0, fmt.Errorf("discord: upload %s: %s: %s", fileName, resp.Status, raw)
+		name := parts[0].Name
+		if len(parts) > 1 {
+			name = fmt.Sprintf("%s (+%d)", parts[0].Name, len(parts)-1)
+		}
+		return message{}, 0, fmt.Errorf("discord: upload %s: %s: %s", name, resp.Status, raw)
 	}
 
 	if remaining, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining")); err == nil && remaining == 0 {
