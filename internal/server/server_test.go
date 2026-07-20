@@ -370,3 +370,52 @@ func TestDownloadNotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestDownloadJSON(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	payload := []byte("hello json meta")
+	resp, err := http.Post(ts.URL+"/api/upload?fileName=meta.txt",
+		"application/octet-stream", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var up struct {
+		FileID string `json:"fileId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := http.Get(ts.URL + "/f/" + up.FileID + "?json=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer meta.Body.Close()
+	if meta.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", meta.StatusCode)
+	}
+	if ct := meta.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("Content-Type = %q, want json", ct)
+	}
+	var body struct {
+		FileID   string `json:"fileId"`
+		FileName string `json:"fileName"`
+		FileSize int64  `json:"fileSize"`
+	}
+	if err := json.NewDecoder(meta.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.FileID != up.FileID || body.FileName != "meta.txt" || body.FileSize != int64(len(payload)) {
+		t.Fatalf("meta = %+v", body)
+	}
+
+	missing, err := http.Get(ts.URL + "/f/nope?json=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer missing.Body.Close()
+	if missing.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing status = %d", missing.StatusCode)
+	}
+}

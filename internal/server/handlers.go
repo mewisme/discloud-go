@@ -121,12 +121,25 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	f, err := s.store.GetFile(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
+		if r.URL.Query().Get("json") == "1" {
+			writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
+			return
+		}
 		http.Error(w, "Cannot find the specified file", http.StatusNotFound)
 		return
 	}
 	if err != nil {
 		s.log.Error("get file failed", "id", r.PathValue("id"), "error", err)
+		if r.URL.Query().Get("json") == "1" {
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if r.URL.Query().Get("json") == "1" {
+		writeJSON(w, http.StatusOK, f)
 		return
 	}
 

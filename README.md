@@ -60,7 +60,7 @@ Use the site origin (`http://localhost:3000` or your domain). Full reference:
 | `POST /api/upload?fileName=` | Whole-file upload (raw body) |
 | `POST /api/chunks` · `GET/HEAD /api/chunks/{sha256}` | Chunked / resumable |
 | `POST /api/upload/complete` | Assemble from chunk hashes |
-| `GET /f/{id}` | Download (`Range`, `?download=1`) |
+| `GET /f/{id}` | Download (`Range`, `?download=1`, `?json=1` metadata) |
 | `GET /api/files` · `/api/files/{id}` | List / metadata |
 | `GET /api/info` | Bots / upload worker hint |
 | `GET /healthz` · `/readyz` | Health |

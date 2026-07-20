@@ -172,13 +172,17 @@ printf '%s\\n' "\${hashes[@]}" | jq -R . | jq -s \\
           Stream a file. The trailing file name segment is optional and purely
           cosmetic. Add <code className="font-mono">?download=1</code> for a{" "}
           <code className="font-mono">Content-Disposition: attachment</code>{" "}
-          response. Single-range <code className="font-mono">Range</code>{" "}
-          requests are supported (206 with{" "}
-          <code className="font-mono">Content-Range</code>); open-ended ranges
-          like <code className="font-mono">bytes=0-</code> return at most a
-          5 MB window, which is what media players expect when seeking.
+          response, or <code className="font-mono">?json=1</code> for the same
+          metadata JSON as <code className="font-mono">GET /api/files/{"{id}"}</code>
+          {" "}(no bytes streamed). Single-range{" "}
+          <code className="font-mono">Range</code> requests are supported (206
+          with <code className="font-mono">Content-Range</code>); open-ended
+          ranges like <code className="font-mono">bytes=0-</code> return at most
+          a 5 MB window, which is what media players expect when seeking.
         </P>
         <DocsCode>{`curl -OJ "$BASE/f/894d9eec70b09280134933c50b168592/video.mp4?download=1"
+
+curl -s "$BASE/f/894d9eec70b09280134933c50b168592?json=1"
 
 # Seek into the middle of a file
 curl -H "Range: bytes=8388508-8388708" "$BASE/f/894d9eec70b09280134933c50b168592"`}</DocsCode>
