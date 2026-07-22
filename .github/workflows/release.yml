@@ -55,8 +55,9 @@ jobs:
         run: |
           payload=$(jq -n \
             --arg name "discloud-cli" \
+            --arg repo "${{ github.event.repository.name }}" \
             --arg tag "${GITHUB_REF_NAME}" \
-            '{event_type:"sync-package",client_payload:{name:$name,tag:$tag}}')
+            '{event_type:"sync-package",client_payload:{name:$name,repo:$repo,tag:$tag}}')
           for repo in homebrew-mew scoop-mew; do
             echo "$payload" | gh api "repos/${{ github.repository_owner }}/${repo}/dispatches" --input -
             echo "Dispatched sync-package to ${{ github.repository_owner }}/${repo} (${GITHUB_REF_NAME})"
