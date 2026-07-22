@@ -26,16 +26,14 @@ type Config struct {
 }
 
 // DefaultConfig resolves settings in order:
-// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN) → nearest .env
-// (DISCLOUD_* or API_URL / WEB_ORIGIN) → ~/.config/discloud/config.json → localhost defaults.
+// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN) → config.json → localhost defaults.
 // CLI flags (--base / --origin) override after this when set by the caller.
 func DefaultConfig() Config {
 	envBase := os.Getenv("DISCLOUD_BASE")
 	envOrigin := os.Getenv("DISCLOUD_ORIGIN")
-	dotBase, dotOrigin := loadDotEnvValues()
 	fileBase, fileOrigin := loadConfigFile()
-	base := firstNonEmpty(envBase, dotBase, fileBase, "http://localhost:8080")
-	origin := firstNonEmpty(envOrigin, dotOrigin, fileOrigin, "http://localhost:3000")
+	base := firstNonEmpty(envBase, fileBase, "http://localhost:8080")
+	origin := firstNonEmpty(envOrigin, fileOrigin, "http://localhost:3000")
 	return Config{
 		BaseURL:    strings.TrimRight(base, "/"),
 		Origin:     strings.TrimRight(origin, "/"),

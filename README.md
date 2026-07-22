@@ -50,13 +50,13 @@ discloud upload ./file.bin
 discloud files list
 ```
 
-Config order: flags → env → nearest `.env` → `config.json` → localhost.  
+Config order: flags → env → `config.json` → localhost.  
 See `discloud config --help`. Client binary is `discloud`; Docker API is `/discloud`.
 
 ## Develop
 
 ```bash
-go run ./cmd/discloud                 # needs Discord + DATABASE_URL + VALKEY_URL + WEB_ORIGIN
+go run ./cmd/discloud                # needs Discord + DATABASE_URL + VALKEY_URL + WEB_ORIGIN
 cd web && pnpm i && pnpm dev         # API_URL in web/.env.local
 make test                            # go vet + go test
 ```

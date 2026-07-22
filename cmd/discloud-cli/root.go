@@ -30,8 +30,8 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	cmd.SetVersionTemplate("{{.Version}}\n")
-	cmd.PersistentFlags().StringVar(&flagBase, "base", "", "API origin (env/`.env` DISCLOUD_BASE or API_URL)")
-	cmd.PersistentFlags().StringVar(&flagOrigin, "origin", "", "WEB_ORIGIN for CSRF (env/`.env` DISCLOUD_ORIGIN or WEB_ORIGIN)")
+	cmd.PersistentFlags().StringVar(&flagBase, "base", "", "API origin (env DISCLOUD_BASE)")
+	cmd.PersistentFlags().StringVar(&flagOrigin, "origin", "", "WEB_ORIGIN for CSRF (env DISCLOUD_ORIGIN)")
 	cmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "emit one JSON document on stdout")
 
 	cmd.AddCommand(
