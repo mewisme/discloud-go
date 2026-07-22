@@ -192,6 +192,12 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
+// DeleteSessionsByUserID removes every session for a user (e.g. after password change).
+func (s *Store) DeleteSessionsByUserID(ctx context.Context, userID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)
+	return err
+}
+
 // UpdatePasswordHash sets a new Argon2id hash and bumps updated_at / password_changed_at.
 func (s *Store) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
 	now := time.Now().UTC()

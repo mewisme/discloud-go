@@ -192,3 +192,18 @@ func TestChunkedUploadValidation(t *testing.T) {
 		t.Errorf("oversized chunk: status = %d, want 413", respRaw.StatusCode)
 	}
 }
+
+func TestUploadCompleteRejectsTooManyChunks(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	hashes := make([]string, maxChunksPerFile+1)
+	for i := range hashes {
+		hashes[i] = strings.Repeat("a", 64)
+	}
+	resp, body := completeUpload(t, ts.URL, "big.bin", hashes)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want 400", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "Too many chunks") {
+		t.Fatalf("body = %s", body)
+	}
+}

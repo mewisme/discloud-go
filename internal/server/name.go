@@ -2,6 +2,8 @@ package server
 
 import (
 	"fmt"
+	"mime"
+	"path/filepath"
 	"strings"
 )
 
@@ -45,4 +47,33 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.2f %cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// safeDownloadHeaders picks Content-Type and Content-Disposition for proxied
+// downloads. Scriptable types always force attachment + octet-stream.
+func safeDownloadHeaders(name string, forceDownload bool) (contentType, disposition string) {
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".html", ".htm", ".xhtml", ".svg", ".xml":
+		return "application/octet-stream", "attachment"
+	}
+	ct := mime.TypeByExtension(ext)
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	disposition = "inline"
+	if forceDownload {
+		disposition = "attachment"
+	}
+	// Only allow inline for media/pdf/plain text; everything else attaches.
+	switch {
+	case strings.HasPrefix(ct, "image/"),
+		strings.HasPrefix(ct, "video/"),
+		strings.HasPrefix(ct, "audio/"),
+		ct == "application/pdf",
+		ct == "text/plain":
+		return ct, disposition
+	default:
+		return "application/octet-stream", "attachment"
+	}
 }

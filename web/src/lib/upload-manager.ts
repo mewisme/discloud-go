@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 
-import { withPublicURLs, type UploadResult } from "@/lib/api";
+import { stripTokenFromURL, withPublicURLs, type UploadResult } from "@/lib/api";
 import { isAbortError, uploadFileChunked } from "@/lib/chunked-upload";
 import { rememberLocalFile } from "@/lib/local-files";
 
@@ -92,10 +92,15 @@ function upsertResults(incoming: UploadResult[]): void {
 }
 
 function wireResults(wire: WireState): UploadResult[] {
-  if (Array.isArray(wire.results) && wire.results.length > 0) return wire.results;
-  if (wire.lastResult) return [wire.lastResult];
-  return [];
+  const raw =
+    Array.isArray(wire.results) && wire.results.length > 0
+      ? wire.results
+      : wire.lastResult
+        ? [wire.lastResult]
+        : [];
+  return raw.map(redactResult);
 }
+
 const listeners = new Set<Listener>();
 
 function now(): number {
@@ -146,13 +151,29 @@ function startHeartbeat(): void {
   }, 5_000);
 }
 
+function redactResult(r: UploadResult): UploadResult {
+  return {
+    fileId: r.fileId,
+    fileName: r.fileName,
+    fileSize: r.fileSize,
+    visibility: r.visibility,
+    ownedByCurrentUser: r.ownedByCurrentUser,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    url: stripTokenFromURL(r.url),
+    longURL: stripTokenFromURL(r.longURL),
+    downloadURL: stripTokenFromURL(r.downloadURL),
+    longDownloadURL: stripTokenFromURL(r.longDownloadURL),
+  };
+}
+
 function wirePayload(): WireState {
   return {
     ownerId,
     updatedAt: now(),
     uploading,
     queue: jobs.length,
-    results,
+    results: results.map(redactResult),
   };
 }
 

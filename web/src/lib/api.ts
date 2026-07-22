@@ -157,6 +157,17 @@ export function buildInspectPath(fileId: string, token?: string): string {
   return `${u.pathname}${u.search}`;
 }
 
+/** Strip ?token= from a URL string (best-effort). */
+export function stripTokenFromURL(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.searchParams.delete("token");
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
 /** Rebuild share links from the runtime API origin (API_URL inject). */
 export function withPublicURLs(result: UploadResult): UploadResult {
   const id = result.fileId;

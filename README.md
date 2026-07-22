@@ -137,6 +137,8 @@ API server binary in Docker remains `/discloud` and is separate.
 | | |
 | --- | --- |
 | `POST /api/auth/signup\|signin\|signout` · `GET /api/auth/me` | Session cookie auth |
+| `PATCH /api/auth/preferences` | Auth required — `{ "defaultVisibility": "public"\|"private" }` |
+| `POST /api/auth/password` | Auth required — revokes all sessions, re-issues current cookie |
 | `POST /api/upload?fileName=` | Whole-file upload (raw body); optional session → ownership + 30d retention |
 | `POST /api/chunks` · `GET/HEAD /api/chunks/{sha256}` | Chunked / resumable |
 | `POST /api/upload/complete` | Assemble from chunk hashes |
@@ -164,6 +166,7 @@ curl -OJ "$BASE/f/<fileId>?download=1"
 | `DISCORD_CHANNEL_ID` | Required. Channel that holds chunks |
 | `APP_SECRET` | Optional, ≥32 chars if set. HMAC keys for sessions and file tokens. Env wins over `.app.secret`; if unset, auto-generated there |
 | `WEB_ORIGIN` | Required absolute `http`/`https` origin (no path). CORS allowlist + cookie `Secure` |
+| `TRUST_PROXY` | Optional. When `true`/`1`, honor `X-Forwarded-For` / `X-Real-IP` (only behind a trusted edge that strips client values) |
 | `API_URL` | Public API origin for share links and the web UI (default `http://localhost:8080`). Recreate api+web after change — no image rebuild |
 | `DISCLOUD_TAG` | Image tag (default `latest`) |
 | `POSTGRES_PASSWORD` | Compose DB password (default `discloud`) |
@@ -180,6 +183,8 @@ Compose sets `DATABASE_URL` and `VALKEY_URL`. See [`.env.example`](.env.example)
 - `0006_auth_ownership.sql` adds `users`, `sessions`, and file columns
   (`owner_user_id`, `visibility`, `access_token_hash`, `expires_at`). Existing
   files are backfilled as public with `expires_at = created_at + 7 days`.
+- `0009_default_visibility.sql` adds `users.default_visibility` (default
+  `public`). Applied automatically by `Migrate()` on API start.
 - No Discord-side migration; content-addressed `chunk_store` rows are not dropped
   solely because a logical file expired or was deleted.
 

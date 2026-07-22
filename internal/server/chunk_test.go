@@ -138,3 +138,24 @@ func TestHumanBytes(t *testing.T) {
 		t.Errorf("humanBytes(512) = %q", got)
 	}
 }
+
+func TestSafeDownloadHeaders(t *testing.T) {
+	cases := []struct {
+		name, wantCT, wantDisp string
+		forceDownload          bool
+	}{
+		{"x.html", "application/octet-stream", "attachment", false},
+		{"x.svg", "application/octet-stream", "attachment", false},
+		{"x.png", "image/png", "inline", false},
+		{"x.png", "image/png", "attachment", true},
+		{"x.bin", "application/octet-stream", "attachment", false},
+		{"x.pdf", "application/pdf", "inline", false},
+	}
+	for _, tc := range cases {
+		ct, disp := safeDownloadHeaders(tc.name, tc.forceDownload)
+		if ct != tc.wantCT || disp != tc.wantDisp {
+			t.Errorf("safeDownloadHeaders(%q, %v) = (%q, %q), want (%q, %q)",
+				tc.name, tc.forceDownload, ct, disp, tc.wantCT, tc.wantDisp)
+		}
+	}
+}

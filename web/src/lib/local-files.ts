@@ -1,4 +1,5 @@
 import type { UploadResult } from "@/lib/api";
+import { stripTokenFromURL } from "@/lib/api";
 
 const STORAGE_KEY = "discloud:files";
 const CHANGE_EVENT = "discloud:files";
@@ -24,7 +25,12 @@ function readStorage(): LocalFile[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as LocalFile[];
-    return Array.isArray(parsed) ? parsed : EMPTY;
+    if (!Array.isArray(parsed)) return EMPTY;
+    return parsed.map((f) => ({
+      ...f,
+      longURL: stripTokenFromURL(f.longURL ?? ""),
+      longDownloadURL: stripTokenFromURL(f.longDownloadURL ?? ""),
+    }));
   } catch {
     return EMPTY;
   }
@@ -94,8 +100,8 @@ export function rememberLocalFile(result: UploadResult): LocalFile {
     fileName: result.fileName,
     fileSize: result.fileSize,
     createdAt: new Date().toISOString(),
-    longURL: result.longURL,
-    longDownloadURL: result.longDownloadURL,
+    longURL: stripTokenFromURL(result.longURL),
+    longDownloadURL: stripTokenFromURL(result.longDownloadURL),
   };
   const next = [entry, ...snapshot.filter((f) => f.fileId !== entry.fileId)];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));

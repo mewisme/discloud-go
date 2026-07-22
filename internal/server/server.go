@@ -35,6 +35,7 @@ type Store interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash string, now time.Time) (store.Session, error)
 	TouchSession(ctx context.Context, tokenHash, ip, userAgent string, now time.Time) error
 	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteSessionsByUserID(ctx context.Context, userID string) error
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
 	UpdateDefaultVisibility(ctx context.Context, userID, visibility string) error
 	OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (store.OwnerStats, error)
@@ -61,8 +62,11 @@ type Options struct {
 	VisitorSalt   string
 	WebOrigin     string
 	CookieSecure  bool
-	Keys          auth.Keys
-	Now           func() time.Time // nil → time.Now
+	// TrustProxy honors X-Forwarded-For / X-Real-IP. Only enable when a
+	// trusted edge strips client-supplied forwarding headers.
+	TrustProxy bool
+	Keys       auth.Keys
+	Now        func() time.Time // nil → time.Now
 }
 
 type Server struct {
@@ -74,10 +78,11 @@ type Server struct {
 	visitorSalt   string
 	webOrigin     string
 	cookieSecure  bool
+	trustProxy    bool
 	keys          auth.Keys
 	now           func() time.Time
-	// cdn streams chunk bytes from the Discord CDN; no overall timeout so
-	// slow client downloads aren't cut off mid-stream.
+	// cdn streams chunk bytes from the Discord CDN. ResponseHeaderTimeout
+	// bounds hung connects; no Client.Timeout so slow body reads continue.
 	cdn *http.Client
 }
 
@@ -95,9 +100,14 @@ func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, opts Options)
 		visitorSalt:   opts.VisitorSalt,
 		webOrigin:     opts.WebOrigin,
 		cookieSecure:  opts.CookieSecure,
+		trustProxy:    opts.TrustProxy,
 		keys:          opts.Keys,
 		now:           now,
-		cdn:           &http.Client{},
+		cdn: &http.Client{
+			Transport: &http.Transport{
+				ResponseHeaderTimeout: 2 * time.Minute,
+			},
+		},
 	}
 }
 

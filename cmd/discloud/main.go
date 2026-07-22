@@ -68,6 +68,7 @@ func run(log *slog.Logger) error {
 		VisitorSalt:   salt,
 		WebOrigin:     cfg.WebOrigin,
 		CookieSecure:  cfg.CookieSecure,
+		TrustProxy:    cfg.TrustProxy,
 		Keys:          auth.DeriveKeys(cfg.AppSecret),
 	})
 	go srv.RunCleanup(ctx)

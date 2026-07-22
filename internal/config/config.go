@@ -40,6 +40,8 @@ type Config struct {
 	WebOrigin string
 	// CookieSecure is true when WebOrigin uses HTTPS.
 	CookieSecure bool
+	// TrustProxy honors X-Forwarded-For / X-Real-IP when a trusted edge strips client values.
+	TrustProxy bool
 }
 
 func Load() (Config, error) {
@@ -52,6 +54,7 @@ func Load() (Config, error) {
 		APIURL:           strings.TrimSpace(os.Getenv("API_URL")),
 		AppSecret:        os.Getenv("APP_SECRET"),
 		WebOrigin:        strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
+		TrustProxy:       envTruthy("TRUST_PROXY"),
 	}
 	for name, v := range map[string]string{
 		"DATABASE_URL":       c.DatabaseURL,
@@ -120,6 +123,15 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envTruthy(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // LoadOrCreateVisitorHashSalt returns the salt from path, or generates one and

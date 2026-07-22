@@ -116,7 +116,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
 		return
 	}
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	ua := r.Header.Get("User-Agent")
 	_ = s.store.TouchSession(r.Context(), tokenHash, ip, ua, now)
 	sess, err := s.store.GetSessionByTokenHash(r.Context(), tokenHash, now)
@@ -227,6 +227,17 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	if err := s.store.DeleteSessionsByUserID(r.Context(), u.ID); err != nil {
+		s.log.Error("revoke sessions failed", "user", u.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	u.PasswordHash = hash
+	if err := s.issueSession(w, r, u); err != nil {
+		s.log.Error("reissue session failed", "user", u.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	s.log.Info("password_changed", "user", u.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -246,7 +257,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, u store.Us
 	}
 	now := s.now().UTC()
 	ua := r.Header.Get("User-Agent")
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	sess := store.Session{
 		ID:         newID(),
 		UserID:     u.ID,
@@ -294,14 +305,17 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (store.User
 }
 
 func (s *Server) allowAuth(r *http.Request, kind string) bool {
-	key := "discloud:rl:" + kind + ":" + clientIP(r)
+	key := "discloud:rl:" + kind + ":" + s.clientIP(r)
 	n, err := s.cache.Incr(r.Context(), key)
 	if err != nil {
 		s.log.Error("rate limit incr failed", "error", err)
-		return true // fail open
+		return false // fail closed
 	}
 	if n == 1 {
-		_ = s.cache.Expire(r.Context(), key, authRateLimitWindow)
+		if err := s.cache.Expire(r.Context(), key, authRateLimitWindow); err != nil {
+			s.log.Error("rate limit expire failed", "error", err)
+			return false
+		}
 	}
 	return n <= authRateLimit
 }

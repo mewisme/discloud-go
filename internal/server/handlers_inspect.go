@@ -42,7 +42,7 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	base := s.baseURL(r)
-	links := s.fileLinksResponse(r, base, info.File, token)
+	links := s.fileLinksResponse(base, info.File, token, access.User)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"fileId":             info.ID,
 		"fileName":           info.Name,

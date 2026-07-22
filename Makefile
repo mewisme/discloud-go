@@ -8,7 +8,7 @@ test:
 	go test ./...
 
 lint:
-	gofmt -l .
+	@fmt=$$(gofmt -l .); if [ -n "$$fmt" ]; then echo "gofmt needed on:"; echo "$$fmt"; exit 1; fi
 	cd web && pnpm run lint && pnpm exec tsc --noEmit
 
 build:

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -19,6 +20,10 @@ import (
 )
 
 const DefaultBaseURL = "https://discord.com/api/v10"
+
+// ErrAttachmentGone means Discord no longer has the message attachment
+// (404 or empty attachments). Transient errors must not wrap this.
+var ErrAttachmentGone = errors.New("discord: attachment gone")
 
 // bot is one Discord bot identity with its own rate-limit clock.
 type bot struct {
@@ -151,6 +156,9 @@ func (c *Client) attachmentURLWith(ctx context.Context, b *bot, messageID string
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("%w: message %s", ErrAttachmentGone, messageID)
+	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return "", fmt.Errorf("discord: get message %s: %s: %s", messageID, resp.Status, body)
@@ -160,7 +168,7 @@ func (c *Client) attachmentURLWith(ctx context.Context, b *bot, messageID string
 		return "", err
 	}
 	if len(msg.Attachments) == 0 {
-		return "", fmt.Errorf("discord: message %s has no attachments", messageID)
+		return "", fmt.Errorf("%w: message %s has no attachments", ErrAttachmentGone, messageID)
 	}
 	return msg.Attachments[0].URL, nil
 }

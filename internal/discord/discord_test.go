@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -149,5 +150,29 @@ func TestUploadChunkReturnsBotID(t *testing.T) {
 	// first Add(1)%2 = 1 -> tok-b
 	if up.MessageID != "42" || up.BotID != 1 {
 		t.Fatalf("upload = %+v, want message 42 bot 1", up)
+	}
+}
+
+func TestAttachmentURLGone(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	c := New("tok", "ch")
+	c.BaseURL = ts.URL
+	_, err := c.AttachmentURL(context.Background(), "missing", 0)
+	if !errors.Is(err, ErrAttachmentGone) {
+		t.Fatalf("err = %v, want ErrAttachmentGone", err)
+	}
+
+	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"1","attachments":[]}`)
+	}))
+	t.Cleanup(ts2.Close)
+	c.BaseURL = ts2.URL
+	_, err = c.AttachmentURL(context.Background(), "empty", 0)
+	if !errors.Is(err, ErrAttachmentGone) {
+		t.Fatalf("empty attachments err = %v, want ErrAttachmentGone", err)
 	}
 }

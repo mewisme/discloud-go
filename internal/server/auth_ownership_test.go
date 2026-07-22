@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -238,6 +240,18 @@ func TestAuthChangePassword(t *testing.T) {
 	}
 	short.Body.Close()
 
+	other := e.doJSON(t, http.MethodPost, "/api/auth/signin", "", map[string]string{
+		"username": "changer", "password": "password1",
+	})
+	if other.StatusCode != http.StatusOK {
+		t.Fatalf("second signin = %d", other.StatusCode)
+	}
+	otherCookie := cookieFrom(other)
+	other.Body.Close()
+	if otherCookie == "" || otherCookie == cookie {
+		t.Fatal("expected distinct second-device cookie")
+	}
+
 	before := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
 	beforeBody := decodeJSON[map[string]any](t, before)
 	prevChanged, _ := beforeBody["passwordChangedAt"].(string)
@@ -250,10 +264,24 @@ func TestAuthChangePassword(t *testing.T) {
 		ok.Body.Close()
 		t.Fatalf("change password = %d: %s", ok.StatusCode, body)
 	}
+	newCookie := cookieFrom(ok)
 	ok.Body.Close()
+	if newCookie == "" {
+		t.Fatal("password change must re-issue session cookie")
+	}
 
-	// Current session stays valid.
-	me := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
+	stale := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
+	if stale.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old cookie still valid = %d", stale.StatusCode)
+	}
+	stale.Body.Close()
+	staleOther := e.do(t, http.MethodGet, "/api/auth/me", otherCookie, "", "")
+	if staleOther.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("other-device cookie still valid = %d", staleOther.StatusCode)
+	}
+	staleOther.Body.Close()
+
+	me := e.do(t, http.MethodGet, "/api/auth/me", newCookie, "", "")
 	meBody := decodeJSON[map[string]any](t, me)
 	if meBody["passwordChangedAt"] == prevChanged {
 		t.Fatalf("passwordChangedAt not bumped: %v", meBody["passwordChangedAt"])
@@ -872,5 +900,143 @@ func TestPublicPreviewNoOriginWithCookie(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want 302 CDN redirect", resp.StatusCode)
+	}
+}
+
+func TestAdminCrossTenantPrivateAccess(t *testing.T) {
+	e := newAuthEnv(t)
+	adminCookie, _ := e.signup(t, "admin", "password1")
+	ownerCookie, _ := e.signup(t, "owner", "password1")
+	strangerCookie, _ := e.signup(t, "stranger", "password1")
+
+	up := e.upload(t, ownerCookie, "secret.txt", "private-bytes")
+	id := up["fileId"].(string)
+	vis := e.doJSON(t, http.MethodPatch, "/api/files/"+id+"/visibility", ownerCookie, map[string]string{
+		"visibility": "private",
+	})
+	if vis.StatusCode != http.StatusOK {
+		t.Fatalf("make private = %d", vis.StatusCode)
+	}
+	vis.Body.Close()
+
+	adminGet := e.do(t, http.MethodGet, "/api/files/"+id, adminCookie, "", "")
+	if adminGet.StatusCode != http.StatusOK {
+		t.Fatalf("admin get file = %d", adminGet.StatusCode)
+	}
+	adminGet.Body.Close()
+
+	adminJSON := e.do(t, http.MethodGet, "/f/"+id+"?json=1", adminCookie, "", "")
+	if adminJSON.StatusCode != http.StatusOK {
+		t.Fatalf("admin /f?json=1 = %d", adminJSON.StatusCode)
+	}
+	adminJSON.Body.Close()
+
+	strangerGet := e.do(t, http.MethodGet, "/api/files/"+id, strangerCookie, "", "")
+	if strangerGet.StatusCode != http.StatusNotFound {
+		t.Fatalf("stranger get = %d, want 404", strangerGet.StatusCode)
+	}
+	strangerGet.Body.Close()
+
+	del := e.do(t, http.MethodDelete, "/api/files/"+id, adminCookie, "", "")
+	if del.StatusCode != http.StatusNoContent {
+		t.Fatalf("admin delete = %d", del.StatusCode)
+	}
+	del.Body.Close()
+}
+
+func TestPrivateInspectAuthz(t *testing.T) {
+	e := newAuthEnv(t)
+	cookie, _ := e.signup(t, "owner", "password1")
+	up := e.upload(t, cookie, "secret.txt", "private-bytes")
+	id := up["fileId"].(string)
+	vis := e.doJSON(t, http.MethodPatch, "/api/files/"+id+"/visibility", cookie, map[string]string{
+		"visibility": "private",
+	})
+	body := decodeJSON[map[string]any](t, vis)
+	token, _ := body["accessToken"].(string)
+	if token == "" {
+		t.Fatal("missing accessToken")
+	}
+
+	denied := e.do(t, http.MethodGet, "/api/files/"+id+"/inspect", "", "", "")
+	if denied.StatusCode != http.StatusNotFound {
+		t.Fatalf("anon inspect = %d, want 404", denied.StatusCode)
+	}
+	denied.Body.Close()
+
+	owner := e.do(t, http.MethodGet, "/api/files/"+id+"/inspect", cookie, "", "")
+	if owner.StatusCode != http.StatusOK {
+		t.Fatalf("owner inspect = %d", owner.StatusCode)
+	}
+	owner.Body.Close()
+
+	viaToken := e.do(t, http.MethodGet, "/api/files/"+id+"/inspect?token="+token, "", "", "")
+	if viaToken.StatusCode != http.StatusOK {
+		t.Fatalf("token inspect = %d", viaToken.StatusCode)
+	}
+	viaToken.Body.Close()
+}
+
+func TestChunkedCompleteWithSessionPrivateDefault(t *testing.T) {
+	e := newAuthEnv(t)
+	cookie, _ := e.signup(t, "uploader", "password1")
+	pref := e.doJSON(t, http.MethodPatch, "/api/auth/preferences", cookie, map[string]string{
+		"defaultVisibility": "private",
+	})
+	if pref.StatusCode != http.StatusOK {
+		t.Fatalf("preferences = %d", pref.StatusCode)
+	}
+	pref.Body.Close()
+
+	data := []byte("chunked-owned-private")
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+
+	req, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/chunks", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Cookie", sessionCookieName+"="+cookie)
+	req.Header.Set("Origin", testWebOrigin)
+	chunkResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chunkResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(chunkResp.Body)
+		chunkResp.Body.Close()
+		t.Fatalf("chunk upload = %d: %s", chunkResp.StatusCode, body)
+	}
+	chunkResp.Body.Close()
+
+	completeBody, _ := json.Marshal(map[string]any{
+		"fileName": "owned.bin", "chunkHashes": []string{hash},
+	})
+	creq, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/upload/complete", bytes.NewReader(completeBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	creq.Header.Set("Content-Type", "application/json")
+	creq.Header.Set("Cookie", sessionCookieName+"="+cookie)
+	creq.Header.Set("Origin", testWebOrigin)
+	cresp, err := http.DefaultClient.Do(creq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cresp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(cresp.Body)
+		cresp.Body.Close()
+		t.Fatalf("complete = %d: %s", cresp.StatusCode, body)
+	}
+	out := decodeJSON[map[string]any](t, cresp)
+	if out["visibility"] != "private" {
+		t.Fatalf("visibility = %v, want private", out["visibility"])
+	}
+	if out["accessToken"] == nil || out["accessToken"] == "" {
+		t.Fatal("expected accessToken for private default")
+	}
+	if out["ownedByCurrentUser"] != true {
+		t.Fatalf("ownedByCurrentUser = %v", out["ownedByCurrentUser"])
 	}
 }

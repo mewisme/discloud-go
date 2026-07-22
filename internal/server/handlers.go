@@ -8,10 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/mewisme/discloud-go/internal/auth"
+	"github.com/mewisme/discloud-go/internal/discord"
 	"github.com/mewisme/discloud-go/internal/store"
 )
 
@@ -31,6 +30,8 @@ const (
 	// one bot token is configured (pipeline a few chunks despite one rate clock).
 	singleBotUploadConcurrency = 3
 	listLimit                  = 50
+	// maxChunksPerFile caps assembled metadata (~64 GiB at chunkSize).
+	maxChunksPerFile = 8192
 )
 
 // discordUploadLimit is how many Discord attachment uploads may run at once.
@@ -133,7 +134,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("json") == "1" {
-		writeJSON(w, http.StatusOK, s.fileMetaDTO(r, f, ""))
+		writeJSON(w, http.StatusOK, s.fileMetaDTO(r, f, "", access.User))
 		return
 	}
 
@@ -180,15 +181,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Accept-Ranges", "bytes")
-	ct := mime.TypeByExtension(filepath.Ext(f.Name))
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
+	ct, disposition := safeDownloadHeaders(f.Name, isDownload)
 	w.Header().Set("Content-Type", ct)
-	disposition := "inline"
-	if isDownload {
-		disposition = "attachment"
-	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, f.Name))
 
 	full := byteRange{start: 0, end: f.Size - 1}
@@ -249,8 +243,8 @@ func (s *Server) extendDownload(ctx context.Context, fileID string) {
 }
 
 // resolveCDNURL returns a signed Discord CDN URL for a part, caching hits.
-// When Discord no longer has the attachment, the content-addressed chunk row
-// is dropped so the next upload re-POSTs those bytes.
+// When Discord confirms the attachment is gone, the content-addressed chunk
+// row is dropped so the next upload re-POSTs those bytes.
 func (s *Server) resolveCDNURL(ctx context.Context, part store.FilePart) (string, error) {
 	cdnURL, ok := s.cache.GetURL(ctx, part.MessageID)
 	if ok {
@@ -258,10 +252,12 @@ func (s *Server) resolveCDNURL(ctx context.Context, part store.FilePart) (string
 	}
 	cdnURL, err := s.discord.AttachmentURL(ctx, part.MessageID, part.BotID)
 	if err != nil {
-		if delErr := s.store.DeleteChunksByMessageID(ctx, part.MessageID); delErr != nil {
-			s.log.Error("purge dead chunk failed", "message", part.MessageID, "error", delErr)
-		} else {
-			s.log.Info("purged dead chunk refs", "message", part.MessageID)
+		if errors.Is(err, discord.ErrAttachmentGone) {
+			if delErr := s.store.DeleteChunksByMessageID(ctx, part.MessageID); delErr != nil {
+				s.log.Error("purge dead chunk failed", "message", part.MessageID, "error", delErr)
+			} else {
+				s.log.Info("purged dead chunk refs", "message", part.MessageID)
+			}
 		}
 		return "", err
 	}
@@ -336,8 +332,9 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(files))
 	base := s.baseURL(r)
+	viewer := &u
 	for _, f := range files {
-		out = append(out, s.fileLinksResponse(r, base, f, ""))
+		out = append(out, s.fileLinksResponse(base, f, "", viewer))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"files": out})
 }
@@ -362,7 +359,7 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 			token = r.Header.Get("X-File-Token")
 		}
 	}
-	writeJSON(w, http.StatusOK, s.fileMetaDTO(r, access.File, token))
+	writeJSON(w, http.StatusOK, s.fileMetaDTO(r, access.File, token, access.User))
 }
 
 func (s *Server) baseURL(r *http.Request) string {
@@ -414,28 +411,31 @@ func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, part
 
 func (s *Server) writeFileCreated(w http.ResponseWriter, r *http.Request, f store.File, rawToken string) {
 	base := s.baseURL(r)
-	out := s.fileLinksResponse(r, base, f, rawToken)
+	var viewer *store.User
+	if u, ok := s.sessionUser(r); ok {
+		viewer = &u
+	}
+	out := s.fileLinksResponse(base, f, rawToken, viewer)
 	if rawToken != "" {
 		out["accessToken"] = rawToken
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) ownedByCurrentUser(r *http.Request, f store.File) bool {
-	u, ok := s.sessionUser(r)
-	if !ok || f.OwnerUserID == nil {
+func ownedByUser(u *store.User, f store.File) bool {
+	if u == nil || f.OwnerUserID == nil {
 		return false
 	}
 	return *f.OwnerUserID == u.ID
 }
 
-func (s *Server) fileMetaDTO(r *http.Request, f store.File, rawToken string) map[string]any {
+func (s *Server) fileMetaDTO(r *http.Request, f store.File, rawToken string, viewer *store.User) map[string]any {
 	base := s.baseURL(r)
-	return s.fileLinksResponse(r, base, f, rawToken)
+	return s.fileLinksResponse(base, f, rawToken, viewer)
 }
 
 // fileLinksResponse builds share/download URLs; rawToken is appended for private links.
-func (s *Server) fileLinksResponse(r *http.Request, base string, f store.File, rawToken string) map[string]any {
+func (s *Server) fileLinksResponse(base string, f store.File, rawToken string, viewer *store.User) map[string]any {
 	urlPath := withToken(base+"/f/"+f.ID, rawToken)
 	longPath := withToken(base+"/f/"+f.ID+"/"+f.Name, rawToken)
 	dl := withTokenQuery(base+"/f/"+f.ID, "download", "1", rawToken)
@@ -446,7 +446,7 @@ func (s *Server) fileLinksResponse(r *http.Request, base string, f store.File, r
 		"fileSize":           f.Size,
 		"chunkSize":          f.ChunkSize,
 		"visibility":         f.Visibility,
-		"ownedByCurrentUser": s.ownedByCurrentUser(r, f),
+		"ownedByCurrentUser": ownedByUser(viewer, f),
 		"createdAt":          f.CreatedAt,
 		"expiresAt":          f.ExpiresAt,
 		"url":                urlPath,

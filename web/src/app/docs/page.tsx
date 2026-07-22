@@ -210,24 +210,36 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
 
           <Endpoint method="GET" path="/api/auth/me">
             <p>
-              Account dashboard payload: identity, file stats, current session
-              metadata, and retention constants. 401 if not signed in. Touches
-              session <code>lastSeenAt</code>.
+              Account dashboard payload: identity, preferences, file stats,
+              current session metadata, and retention constants. 401 if not
+              signed in. Touches session <code>lastSeenAt</code>.
             </p>
             <DocsCode>{`curl -s -b cookies.txt "$BASE/api/auth/me"
 # → {
 #   "id", "username", "role", "createdAt", "passwordChangedAt",
+#   "preferences": { "defaultVisibility": "public"|"private" },
 #   "stats": { "fileCount", "totalBytes", "publicCount", "privateCount", "expiringSoonCount" },
 #   "session": { "createdAt", "lastSeenAt", "expiresAt", "ip", "userAgent" },
 #   "retention": { "authenticatedDays", "anonymousDays", "downloadExtensionDays", "maxRetentionDays" }
 # }`}</DocsCode>
           </Endpoint>
 
+          <Endpoint method="PATCH" path="/api/auth/preferences">
+            <p>
+              Requires session. Body:{" "}
+              <code>{`{"defaultVisibility":"public"|"private"}`}</code>. Applies
+              to new owned uploads (not existing files).
+            </p>
+            <DocsCode>{`curl -X PATCH -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
+  -b cookies.txt -d '{"defaultVisibility":"private"}' \\
+  "$BASE/api/auth/preferences"`}</DocsCode>
+          </Endpoint>
+
           <Endpoint method="POST" path="/api/auth/password">
             <p>
               Requires session. Body:{" "}
-              <code>{`{"currentPassword","newPassword"}`}</code>. 204. Other
-              sessions stay valid.
+              <code>{`{"currentPassword","newPassword"}`}</code>. 204. Revokes
+              all sessions and re-issues a cookie for this request.
             </p>
             <DocsCode>{`curl -X POST -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
   -b cookies.txt -d '{"currentPassword":"secret123","newPassword":"secret456"}' \\
@@ -238,8 +250,10 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
         <TabsContent value="upload" className="flex flex-col gap-4">
           <SectionIntro title="Upload">
             One request for small/medium files. Body = raw bytes. Server splits
-            into 8&nbsp;MB chunks. Public by default. With a session cookie,
-            the file is owned (30-day retention); anonymous = 7 days.
+            into 8&nbsp;MB chunks. Anonymous uploads are public (7-day
+            retention). Signed-in uploads are owned (30-day retention) and use
+            the account <code>defaultVisibility</code> preference (default
+            public; private returns a one-time <code>accessToken</code>).
           </SectionIntro>
 
           <Endpoint method="POST" path="/api/upload?fileName={name}">

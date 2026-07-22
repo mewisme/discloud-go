@@ -103,6 +103,11 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Missing chunkHashes")
 		return
 	}
+	if len(req.ChunkHashes) > maxChunksPerFile {
+		writeJSONError(w, http.StatusBadRequest,
+			fmt.Sprintf("Too many chunks (max %d)", maxChunksPerFile))
+		return
+	}
 	for _, h := range req.ChunkHashes {
 		if !hashPattern.MatchString(h) {
 			writeJSONError(w, http.StatusBadRequest, "Invalid chunk hash: "+h)

@@ -22,7 +22,7 @@ import { formatBytes, formatDate } from "@/lib/format";
 
 function mimeKind(name: string): "image" | "video" | "other" {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"].includes(ext)) {
+  if (["png", "jpg", "jpeg", "gif", "webp", "avif"].includes(ext)) {
     return "image";
   }
   if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
@@ -70,18 +70,18 @@ export function FileInspectPanel({
     return {
       view: token
         ? buildFileURL({
-            fileId: data.fileId,
-            fileName: data.fileName,
-            token,
-          })
+          fileId: data.fileId,
+          fileName: data.fileName,
+          token,
+        })
         : data.longURL,
       download: token
         ? buildFileURL({
-            fileId: data.fileId,
-            fileName: data.fileName,
-            download: true,
-            token,
-          })
+          fileId: data.fileId,
+          fileName: data.fileName,
+          download: true,
+          token,
+        })
         : data.longDownloadURL,
       preview: token
         ? buildFileURL({ fileId: data.fileId, token })

@@ -367,6 +367,17 @@ func (m *memStore) DeleteSession(_ context.Context, tokenHash string) error {
 	return nil
 }
 
+func (m *memStore) DeleteSessionsByUserID(_ context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for hash, sess := range m.sessions {
+		if sess.UserID == userID {
+			delete(m.sessions, hash)
+		}
+	}
+	return nil
+}
+
 func (m *memStore) UpdatePasswordHash(_ context.Context, userID, passwordHash string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
