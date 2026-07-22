@@ -44,6 +44,9 @@ dockers_v2:
   - images:
       - ghcr.io/mewisme/discloud
     dockerfile: Dockerfile.goreleaser
+    # Context is only binaries + Dockerfile; seed /data needs this dir.
+    extra_files:
+      - data
     tags:
       - "v{{ .Version }}"
       - "{{ if not .Prerelease }}latest{{ end }}"
