@@ -22,24 +22,24 @@ type File struct {
 
 // Inspect holds the fields PrintInspect needs (same names as InspectResponse).
 type Inspect struct {
-	FileID             string
-	FileName           string
-	FileSize           int64
-	ChunkSize          int64
-	ChunkCount         int
-	CreatedAt          time.Time
-	ExpiresAt          time.Time
-	Visibility         string
-	Views              int64
-	Downloads          int64
-	Ranges             int64
-	BytesServed        int64
-	UniqueVisitors     int64
-	LastAccessAt       *time.Time
-	URL                string
-	LongURL            string
-	DownloadURL        string
-	LongDownloadURL    string
+	FileID          string
+	FileName        string
+	FileSize        int64
+	ChunkSize       int64
+	ChunkCount      int
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
+	Visibility      string
+	Views           int64
+	Downloads       int64
+	Ranges          int64
+	BytesServed     int64
+	UniqueVisitors  int64
+	LastAccessAt    *time.Time
+	URL             string
+	LongURL         string
+	DownloadURL     string
+	LongDownloadURL string
 }
 
 // KVBlock is one labeled section inside a combined FIELD/VALUE table.
