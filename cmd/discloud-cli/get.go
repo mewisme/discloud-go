@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +24,7 @@ func newGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolveFileID(c, argOrEmpty(args, 0))
+			id, err := resolveFileID(c, ui.ArgOrEmpty(args, 0))
 			if err != nil {
 				return err
 			}
@@ -39,7 +40,7 @@ func newGetCmd() *cobra.Command {
 			if wantMeta {
 				msg = "Fetching metadata…"
 			}
-			data, err := waitVal(msg, func() ([]byte, error) {
+			data, err := ui.WaitVal(msg, func() ([]byte, error) {
 				return c.Download(id, client.DownloadOptions{
 					Name: name, Download: download, JSON: wantMeta, Token: token, OutPath: outPath,
 				})
@@ -51,7 +52,7 @@ func newGetCmd() *cobra.Command {
 				if flagJSON {
 					return writeJSON(map[string]string{"path": outPath})
 				}
-				printSuccess("wrote %s", outPath)
+				ui.PrintSuccess("wrote %s", outPath)
 				return nil
 			}
 			if _, err := os.Stdout.Write(data); err != nil {

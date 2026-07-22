@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -14,8 +15,8 @@ func newHealthCmd() *cobra.Command {
 		Short: "Check API liveness (/healthz)",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			return runProbe("liveness", "/healthz", "Alive", func(c *client.Client) (string, error) {
-				return waitVal("Checking health…", c.Health)
+			return runProbe("liveness", "/healthz", "Health", func(c *client.Client) (string, error) {
+				return ui.WaitVal("Checking health…", c.Health)
 			})
 		}),
 	}
@@ -28,7 +29,7 @@ func newReadyCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			return runProbe("readiness", "/readyz", "Ready", func(c *client.Client) (string, error) {
-				return waitVal("Checking ready…", c.Ready)
+				return ui.WaitVal("Checking ready…", c.Ready)
 			})
 		}),
 	}
@@ -53,12 +54,14 @@ func runProbe(kind, path, title string, call func(*client.Client) (string, error
 			"status":   status,
 		})
 	}
-	on := colorOn(os.Stdout)
-	printSuccess("%s", bold(on, title))
-	fmt.Printf("%s %s\n", dim(on, "  check:"), kind+" ("+path+")")
-	fmt.Printf("%s %s\n", dim(on, "  base:"), cyan(on, base))
-	fmt.Printf("%s %s\n", dim(on, "  status:"), green(on, status))
-	return nil
+	return ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{
+		Title: title,
+		Rows: [][]string{
+			{"check", kind + " (" + path + ")"},
+			{"base", base},
+			{"status", status},
+		},
+	}})
 }
 
 func newConfigCmd() *cobra.Command {
@@ -68,17 +71,8 @@ func newConfigCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE:  runE(runConfigShow),
 	}
-	cmd.AddCommand(newConfigShowCmd(), newConfigSetCmd(), newConfigPathCmd())
+	cmd.AddCommand(newConfigSetCmd(), newConfigPathCmd())
 	return cmd
-}
-
-func newConfigShowCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show",
-		Short: "Show resolved client config",
-		Args:  cobra.NoArgs,
-		RunE:  runE(runConfigShow),
-	}
 }
 
 func newConfigPathCmd() *cobra.Command {
@@ -118,13 +112,17 @@ func newConfigSetCmd() *cobra.Command {
 					"origin": savedOrigin,
 				})
 			}
-			on := colorOn(os.Stdout)
-			printSuccess("Wrote %s", cyan(on, path))
+			on := ui.ColorOn(os.Stdout)
+			ui.PrintSuccess("Wrote %s", ui.Cyan(on, path))
+			rows := make([][]string, 0, 2)
 			if savedBase != "" {
-				fmt.Printf("%s %s\n", dim(on, "base:"), cyan(on, savedBase))
+				rows = append(rows, []string{"base", savedBase})
 			}
 			if savedOrigin != "" {
-				fmt.Printf("%s %s\n", dim(on, "origin:"), cyan(on, savedOrigin))
+				rows = append(rows, []string{"origin", savedOrigin})
+			}
+			if len(rows) > 0 {
+				return ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{Title: "Config", Rows: rows}})
 			}
 			return nil
 		}),
@@ -148,10 +146,13 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 			"file":    client.ConfigFilePath(),
 		})
 	}
-	on := colorOn(os.Stdout)
-	fmt.Printf("%s %s\n", dim(on, "base:"), cyan(on, cfg.BaseURL))
-	fmt.Printf("%s %s\n", dim(on, "origin:"), cyan(on, cfg.Origin))
-	fmt.Printf("%s %s\n", dim(on, "cookies:"), dim(on, cfg.CookiePath))
-	fmt.Printf("%s %s\n", dim(on, "file:"), dim(on, client.ConfigFilePath()))
-	return nil
+	return ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{
+		Title: "Config",
+		Rows: [][]string{
+			{"base", cfg.BaseURL},
+			{"origin", cfg.Origin},
+			{"cookies", cfg.CookiePath},
+			{"file", client.ConfigFilePath()},
+		},
+	}})
 }

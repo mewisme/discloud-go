@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -16,7 +17,7 @@ func newUploadCmd() *cobra.Command {
 		Short: "Resumable chunked upload",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			path, err := resolveArg(argOrEmpty(args, 0), "Path: ")
+			path, err := ui.ResolveArg(ui.ArgOrEmpty(args, 0), "Path: ")
 			if err != nil {
 				return err
 			}
@@ -24,10 +25,10 @@ func newUploadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var bar *progressBar
+			var bar *ui.ProgressBar
 			var progress client.ProgressFunc
-			if showWaitUI() {
-				bar = newProgressBar(os.Stderr)
+			if ui.ShowWaitUI() {
+				bar = ui.NewProgressBar(os.Stderr)
 				progress = bar.Update
 			}
 			raw, err := c.UploadChunked(path, client.UploadChunkedOptions{
@@ -61,15 +62,15 @@ func newUploadCmd() *cobra.Command {
 }
 
 func printUploadSuccess(item FileItem) {
-	on := colorOn(os.Stdout)
-	printSuccess("%s %s (%s) %s",
-		iconUp,
-		bold(on, item.FileName),
-		dim(on, client.FormatBytes(item.FileSize)),
-		cyan(on, item.FileID),
+	on := ui.ColorOn(os.Stdout)
+	ui.PrintSuccess("%s %s (%s) %s",
+		ui.IconUp,
+		ui.Bold(on, item.FileName),
+		ui.Dim(on, client.FormatBytes(item.FileSize)),
+		ui.Cyan(on, item.FileID),
 	)
 	if item.AccessToken != "" {
-		fmt.Printf("%s %s\n", yellow(on, iconKey), cyan(on, item.AccessToken))
+		fmt.Printf("%s %s\n", ui.Yellow(on, ui.IconKey), ui.Cyan(on, item.AccessToken))
 	}
 }
 
@@ -80,7 +81,7 @@ func newUploadRawCmd() *cobra.Command {
 		Short: "Single POST /api/upload",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			path, err := resolveArg(argOrEmpty(args, 0), "Path: ")
+			path, err := ui.ResolveArg(ui.ArgOrEmpty(args, 0), "Path: ")
 			if err != nil {
 				return err
 			}
@@ -88,7 +89,7 @@ func newUploadRawCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			raw, err := waitVal("Uploading…", func() (map[string]any, error) {
+			raw, err := ui.WaitVal("Uploading…", func() (map[string]any, error) {
 				return c.UploadRaw(path, name)
 			})
 			if err != nil {

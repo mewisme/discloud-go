@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -20,8 +20,9 @@ type spinner struct {
 	closed bool
 }
 
-func showWaitUI() bool {
-	return !flagJSON && isTTY(os.Stderr)
+// ShowWaitUI reports whether spinner/progress UI should run (TTY and not JSON).
+func ShowWaitUI() bool {
+	return !JSON && IsTTY(os.Stderr)
 }
 
 func startSpinner(w io.Writer, msg string) *spinner {
@@ -51,9 +52,9 @@ func (s *spinner) loop() {
 			}
 			on := false
 			if f, ok := s.w.(*os.File); ok {
-				on = colorOn(f)
+				on = ColorOn(f)
 			}
-			frame := cyan(on, spinnerFrames[i%len(spinnerFrames)])
+			frame := Cyan(on, spinnerFrames[i%len(spinnerFrames)])
 			fmt.Fprintf(s.w, "\r%s %s", frame, s.msg)
 			i++
 			s.mu.Unlock()
@@ -78,9 +79,9 @@ func (s *spinner) Stop() {
 	fmt.Fprint(s.w, "\r\033[K")
 }
 
-// withSpinner runs fn while showing a wait spinner (TTY, non-JSON only).
-func withSpinner(msg string, fn func() error) error {
-	if !showWaitUI() {
+// WithSpinner runs fn while showing a wait spinner (TTY, non-JSON only).
+func WithSpinner(msg string, fn func() error) error {
+	if !ShowWaitUI() {
 		return fn()
 	}
 	s := startSpinner(os.Stderr, msg)
@@ -89,10 +90,10 @@ func withSpinner(msg string, fn func() error) error {
 	return err
 }
 
-// waitVal runs fn under a spinner and returns its value.
-func waitVal[T any](msg string, fn func() (T, error)) (T, error) {
+// WaitVal runs fn under a spinner and returns its value.
+func WaitVal[T any](msg string, fn func() (T, error)) (T, error) {
 	var v T
-	err := withSpinner(msg, func() error {
+	err := WithSpinner(msg, func() error {
 		var e error
 		v, e = fn()
 		return e

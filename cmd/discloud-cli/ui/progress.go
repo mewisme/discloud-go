@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -9,8 +9,8 @@ import (
 	"github.com/mewisme/discloud-go/internal/client"
 )
 
-// progressBar writes a race-safe progress line to stderr.
-type progressBar struct {
+// ProgressBar writes a race-safe progress line to stderr.
+type ProgressBar struct {
 	mu     sync.Mutex
 	w      io.Writer
 	width  int
@@ -19,14 +19,16 @@ type progressBar struct {
 	closed bool
 }
 
-func newProgressBar(w io.Writer) *progressBar {
+// NewProgressBar creates a progress bar writing to w (stderr if nil).
+func NewProgressBar(w io.Writer) *ProgressBar {
 	if w == nil {
 		w = os.Stderr
 	}
-	return &progressBar{w: w, width: 20}
+	return &ProgressBar{w: w, width: 20}
 }
 
-func (p *progressBar) Update(sent, total int64) {
+// Update advances the bar to sent/total (monotonic on sent).
+func (p *ProgressBar) Update(sent, total int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
@@ -41,7 +43,8 @@ func (p *progressBar) Update(sent, total int64) {
 	p.renderLocked()
 }
 
-func (p *progressBar) Finish() {
+// Finish draws 100% and closes the bar.
+func (p *ProgressBar) Finish() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
@@ -55,7 +58,7 @@ func (p *progressBar) Finish() {
 	p.closed = true
 }
 
-func (p *progressBar) renderLocked() {
+func (p *ProgressBar) renderLocked() {
 	total := p.total
 	sent := p.last
 	pct := 0.0
@@ -84,14 +87,14 @@ func (p *progressBar) renderLocked() {
 	}
 	on := false
 	if f, ok := p.w.(*os.File); ok {
-		on = colorOn(f)
+		on = ColorOn(f)
 	}
 	body := fmt.Sprintf("[%s] %3.0f%% %s / %s",
 		string(bar), pct, client.FormatBytes(sent), client.FormatBytes(total))
 	if pct >= 100 {
-		body = green(on, body)
+		body = Green(on, body)
 	} else {
-		body = cyan(on, body)
+		body = Cyan(on, body)
 	}
 	fmt.Fprintf(p.w, "\r%s", body)
 }

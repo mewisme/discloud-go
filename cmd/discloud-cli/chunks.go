@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +22,7 @@ func newChunksCheckCmd() *cobra.Command {
 		Short: "Check whether a chunk exists",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			hash, err := resolveArg(argOrEmpty(args, 0), "SHA-256: ")
+			hash, err := ui.ResolveArg(ui.ArgOrEmpty(args, 0), "SHA-256: ")
 			if err != nil {
 				return err
 			}
@@ -29,7 +30,7 @@ func newChunksCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ok, err := waitVal("Checking chunk…", func() (bool, error) {
+			ok, err := ui.WaitVal("Checking chunk…", func() (bool, error) {
 				return c.ChunkExists(hash)
 			})
 			if err != nil {
@@ -46,7 +47,7 @@ func newChunksPutCmd() *cobra.Command {
 		Short: "Upload a raw chunk",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			path, err := resolveArg(argOrEmpty(args, 0), "Path: ")
+			path, err := ui.ResolveArg(ui.ArgOrEmpty(args, 0), "Path: ")
 			if err != nil {
 				return err
 			}
@@ -60,7 +61,7 @@ func newChunksPutCmd() *cobra.Command {
 			}
 			var hash string
 			var existed bool
-			err = withSpinner("Uploading chunk…", func() error {
+			err = ui.WithSpinner("Uploading chunk…", func() error {
 				var e error
 				hash, existed, e = c.PutChunk(data)
 				return e

@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -6,6 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+// JSON is set by main from --json; when true, human UI (banner, spinner, prompts) is skipped.
+var JSON bool
 
 const cliBanner = `
 ██████╗ ██╗███████╗ ██████╗██╗      ██████╗ ██╗   ██╗██████╗ 
@@ -17,10 +20,10 @@ const cliBanner = `
 
 `
 
-// printCLIHeader prints the DISCLOUD banner before human command output.
+// PrintHeader prints the DISCLOUD banner before human command output.
 // Skipped for --json and cobra completion (keeps stdout/machine output clean).
-func printCLIHeader(cmd *cobra.Command) {
-	if flagJSON {
+func PrintHeader(cmd *cobra.Command) {
+	if JSON {
 		return
 	}
 	for c := cmd; c != nil; c = c.Parent() {
@@ -29,8 +32,8 @@ func printCLIHeader(cmd *cobra.Command) {
 		}
 	}
 	text := cliBanner
-	if colorOn(os.Stderr) {
-		text = dim(true, text)
+	if ColorOn(os.Stderr) {
+		text = Dim(true, text)
 	}
 	fmt.Fprint(os.Stderr, text)
 }

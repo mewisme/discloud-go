@@ -2,11 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"runtime"
 	"strings"
 
+	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -25,7 +25,8 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			printCLIHeader(cmd)
+			ui.JSON = flagJSON
+			ui.PrintHeader(cmd)
 		},
 	}
 	cmd.SetVersionTemplate("{{.Version}}\n")
@@ -63,12 +64,12 @@ func newVersionCmd() *cobra.Command {
 			if flagJSON {
 				return writeJSON(info)
 			}
-			on := colorOn(os.Stdout)
-			printSuccess("%s", bold(on, "DisCloud CLI"))
-			fmt.Printf("%s %s\n", dim(on, "  version:"), green(on, info["version"]))
-			fmt.Printf("%s %s\n", dim(on, "  go:"), dim(on, info["go"]))
-			fmt.Printf("%s %s\n", dim(on, "  platform:"), cyan(on, info["platform"]))
-			return nil
+			ui.PrintSuccess("%s", ui.Bold(ui.ColorOn(os.Stdout), "DisCloud CLI"))
+			return ui.PrintKVTable(os.Stdout, [][]string{
+				{"version", info["version"]},
+				{"go", info["go"]},
+				{"platform", info["platform"]},
+			})
 		}),
 	}
 }
@@ -94,7 +95,7 @@ func runE(fn func(cmd *cobra.Command, args []string) error) func(cmd *cobra.Comm
 	return func(cmd *cobra.Command, args []string) error {
 		err := fn(cmd, args)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", errorMsg(fmt.Sprintf("discloud-cli: %v", err)))
+			ui.PrintError(err)
 		}
 		return err
 	}
