@@ -2,16 +2,22 @@
 
 import { Download, ExternalLink, RefreshCw, Share2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
 import { ShareQR } from "@/components/share-qr";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchFileInspect, type FileInspect } from "@/lib/api";
+import {
+  buildFileURL,
+  buildInspectPath,
+  fetchFileInspect,
+  type FileInspect,
+} from "@/lib/api";
 import { formatBytes, formatDate } from "@/lib/format";
 
 function mimeKind(name: string): "image" | "video" | "other" {
@@ -23,7 +29,13 @@ function mimeKind(name: string): "image" | "video" | "other" {
   return "other";
 }
 
-export function FileInspectPanel({ fileId }: { fileId: string }) {
+export function FileInspectPanel({
+  fileId,
+  accessToken,
+}: {
+  fileId: string;
+  accessToken?: string;
+}) {
   const [data, setData] = useState<FileInspect | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +43,11 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
 
   useEffect(() => {
     const ac = new AbortController();
-    fetchFileInspect(fileId, { signal: ac.signal })
+    // Defer loading flag so we don't setState synchronously in the effect body.
+    void Promise.resolve().then(() => {
+      if (!ac.signal.aborted) setLoading(true);
+    });
+    fetchFileInspect(fileId, { signal: ac.signal, token: accessToken })
       .then((info) => {
         if (ac.signal.aborted) return;
         setData(info);
@@ -46,12 +62,41 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
         if (!ac.signal.aborted) setLoading(false);
       });
     return () => ac.abort();
-  }, [fileId]);
+  }, [fileId, accessToken]);
+
+  const links = useMemo(() => {
+    if (!data) return null;
+    const token = accessToken;
+    return {
+      view: token
+        ? buildFileURL({
+            fileId: data.fileId,
+            fileName: data.fileName,
+            token,
+          })
+        : data.longURL,
+      download: token
+        ? buildFileURL({
+            fileId: data.fileId,
+            fileName: data.fileName,
+            download: true,
+            token,
+          })
+        : data.longDownloadURL,
+      preview: token
+        ? buildFileURL({ fileId: data.fileId, token })
+        : data.url,
+      inspect:
+        typeof window !== "undefined"
+          ? `${window.location.origin}${buildInspectPath(data.fileId, token)}`
+          : buildInspectPath(data.fileId, token),
+    };
+  }, [data, accessToken]);
 
   const refresh = () => {
     setLoading(true);
     setError(null);
-    fetchFileInspect(fileId)
+    fetchFileInspect(fileId, { token: accessToken })
       .then((info) => {
         setData(info);
         setError(null);
@@ -80,10 +125,9 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
     );
   }
 
-  if (!data) return null;
+  if (!data || !links) return null;
 
   const kind = mimeKind(data.fileName);
-  const inspectPath = `/i/${data.fileId}`;
 
   return (
     <div className="flex flex-col gap-6">
@@ -95,6 +139,19 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
           <p className="mt-1 font-mono text-xs text-muted-foreground">
             {data.fileId}
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {data.visibility && (
+              <Badge variant="secondary">{data.visibility}</Badge>
+            )}
+            {data.expiresAt && (
+              <span className="text-xs text-muted-foreground">
+                Expires {formatDate(data.expiresAt)}
+              </span>
+            )}
+            {accessToken && (
+              <Badge variant="outline">Private link</Badge>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -106,11 +163,11 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
                 if (typeof navigator.share === "function") {
                   await navigator.share({
                     title: data.fileName,
-                    url: data.longURL,
+                    url: links.view,
                   });
                   return;
                 }
-                await navigator.clipboard.writeText(data.longURL);
+                await navigator.clipboard.writeText(links.view);
                 toast.success("Link copied to clipboard");
               } catch (err) {
                 if (err instanceof DOMException && err.name === "AbortError") {
@@ -123,7 +180,7 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
             <Share2 aria-hidden /> Share
           </Button>
           <a
-            href={data.longURL}
+            href={links.view}
             target="_blank"
             rel="noreferrer"
             className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -131,7 +188,7 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
             <ExternalLink aria-hidden /> Open
           </a>
           <a
-            href={data.longDownloadURL}
+            href={links.download}
             className={buttonVariants({ variant: "default", size: "sm" })}
           >
             <Download aria-hidden /> Download
@@ -184,13 +241,13 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
               kind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={data.url}
+                  src={links.preview}
                   alt={data.fileName}
                   className="max-h-96 w-full rounded-lg object-contain bg-muted"
                 />
               ) : (
                 <video
-                  src={data.url}
+                  src={links.preview}
                   controls
                   className="max-h-96 w-full rounded-lg bg-muted"
                 />
@@ -205,18 +262,11 @@ export function FileInspectPanel({ fileId }: { fileId: string }) {
       )}
 
       <div className="grid gap-4 md:grid-cols-[160px_1fr]">
-        <ShareQR value={data.longURL} />
+        <ShareQR value={links.view} />
         <div className="flex flex-col gap-3">
-          <LinkRow label="Share link" href={data.longURL} />
-          <LinkRow label="Download" href={data.longDownloadURL} />
-          <LinkRow
-            label="Inspect"
-            href={
-              typeof window !== "undefined"
-                ? `${window.location.origin}${inspectPath}`
-                : inspectPath
-            }
-          />
+          <LinkRow label="Share link" href={links.view} />
+          <LinkRow label="Download" href={links.download} />
+          <LinkRow label="Inspect" href={links.inspect} />
         </div>
       </div>
 

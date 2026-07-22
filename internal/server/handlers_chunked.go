@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"time"
 
 	"github.com/mewisme/discloud-go/internal/store"
 )
@@ -136,14 +135,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		parts[i] = store.FilePart{MessageID: c.MessageID, BotID: c.BotID}
 	}
 
-	f := store.File{
-		ID:        newID(),
-		Name:      formatFileName(req.FileName),
-		Size:      fileSize,
-		ChunkSize: chunkSize,
-		CreatedAt: time.Now().UTC(),
-		Parts:     parts,
-	}
+	f := s.newOwnedFile(r, newID(), formatFileName(req.FileName), fileSize, parts)
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		s.log.Error("persist file failed", "file", f.Name, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist file metadata")
@@ -152,5 +144,5 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 
 	base := s.baseURL(r)
 	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(fileSize), "chunks", len(parts))
-	writeJSON(w, http.StatusOK, fileLinks(base, f.ID, f.Name, fileSize))
+	writeJSON(w, http.StatusOK, s.fileLinksResponse(r, base, f, ""))
 }

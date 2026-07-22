@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/mewisme/discloud-go/internal/auth"
 	"github.com/mewisme/discloud-go/internal/discord"
 	"github.com/mewisme/discloud-go/internal/store"
 )
@@ -72,6 +74,15 @@ func newFakeDiscord(t *testing.T) (*fakeDiscord, *httptest.Server) {
 		}
 		http.ServeContent(w, r, "chunk", time.Time{}, bytes.NewReader(data))
 	})
+	// Deletion/expiration is Postgres-only — Discord must never be asked to delete.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			t.Errorf("fake discord: unexpected DELETE %s (must not delete Discord messages)", r.URL.Path)
+			http.Error(w, "delete not allowed", http.StatusInternalServerError)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	f.baseURL = ts.URL
@@ -94,6 +105,9 @@ type memStore struct {
 	chunks   map[string]store.Chunk
 	stats    map[string]*fileStats
 	visitors map[string]map[string]struct{}
+	users    map[string]store.User
+	byEmail  map[string]string        // email -> user id
+	sessions map[string]store.Session // token hash -> session
 }
 
 type fileStats struct {
@@ -114,6 +128,9 @@ func (m *memStore) ensureStats(id string) *fileStats {
 func (m *memStore) CreateFile(_ context.Context, f store.File) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if f.Visibility == "" {
+		f.Visibility = store.VisibilityPublic
+	}
 	m.files[f.ID] = f
 	m.ensureStats(f.ID)
 	return nil
@@ -129,13 +146,25 @@ func (m *memStore) GetFile(_ context.Context, id string) (store.File, error) {
 	return f, nil
 }
 
-func (m *memStore) ListFiles(_ context.Context, limit int) ([]store.File, error) {
+func (m *memStore) ListFilesByOwner(_ context.Context, ownerID string, limit, offset int) ([]store.File, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	files := make([]store.File, 0, len(m.files))
+	files := make([]store.File, 0)
 	for _, f := range m.files {
-		files = append(files, f)
+		if f.OwnerUserID != nil && *f.OwnerUserID == ownerID {
+			files = append(files, f)
+		}
 	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].CreatedAt.Equal(files[j].CreatedAt) {
+			return files[i].ID > files[j].ID
+		}
+		return files[i].CreatedAt.After(files[j].CreatedAt)
+	})
+	if offset > len(files) {
+		return []store.File{}, nil
+	}
+	files = files[offset:]
 	if len(files) > limit {
 		files = files[:limit]
 	}
@@ -235,12 +264,160 @@ func (m *memStore) GetFileInspect(_ context.Context, id string) (store.FileInspe
 	}, nil
 }
 
+func (m *memStore) CreateUser(_ context.Context, id, email, passwordHash string) (store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.users == nil {
+		m.users = map[string]store.User{}
+		m.byEmail = map[string]string{}
+	}
+	if _, ok := m.byEmail[email]; ok {
+		return store.User{}, store.ErrConflict
+	}
+	role := store.RoleUser
+	if len(m.users) == 0 {
+		role = store.RoleAdmin
+	}
+	now := time.Now().UTC()
+	u := store.User{ID: id, Email: email, PasswordHash: passwordHash, Role: role, CreatedAt: now, UpdatedAt: now}
+	m.users[id] = u
+	m.byEmail[email] = id
+	return u, nil
+}
+
+func (m *memStore) GetUserByEmail(_ context.Context, email string) (store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.byEmail[email]
+	if !ok {
+		return store.User{}, store.ErrNotFound
+	}
+	return m.users[id], nil
+}
+
+func (m *memStore) GetUserByID(_ context.Context, id string) (store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return store.User{}, store.ErrNotFound
+	}
+	return u, nil
+}
+
+func (m *memStore) CreateSession(_ context.Context, sess store.Session) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessions == nil {
+		m.sessions = map[string]store.Session{}
+	}
+	m.sessions[sess.TokenHash] = sess
+	return nil
+}
+
+func (m *memStore) GetUserBySessionHash(_ context.Context, tokenHash string, now time.Time) (store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.sessions[tokenHash]
+	if !ok || !sess.ExpiresAt.After(now) {
+		return store.User{}, store.ErrNotFound
+	}
+	u, ok := m.users[sess.UserID]
+	if !ok {
+		return store.User{}, store.ErrNotFound
+	}
+	return u, nil
+}
+
+func (m *memStore) DeleteSession(_ context.Context, tokenHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, tokenHash)
+	return nil
+}
+
+func (m *memStore) UpdateVisibility(_ context.Context, id, visibility string, tokenHash *string, rotatedAt *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.files[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	f.Visibility = visibility
+	if visibility == store.VisibilityPublic {
+		f.AccessTokenHash = ""
+		f.AccessTokenRotatedAt = nil
+	} else if tokenHash != nil {
+		f.AccessTokenHash = *tokenHash
+		f.AccessTokenRotatedAt = rotatedAt
+	}
+	m.files[id] = f
+	return nil
+}
+
+func (m *memStore) RotateAccessToken(_ context.Context, id, tokenHash string, rotatedAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.files[id]
+	if !ok || f.Visibility != store.VisibilityPrivate {
+		return store.ErrNotFound
+	}
+	f.AccessTokenHash = tokenHash
+	f.AccessTokenRotatedAt = &rotatedAt
+	m.files[id] = f
+	return nil
+}
+
+func (m *memStore) DeleteFile(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.files[id]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.files, id)
+	return nil
+}
+
+func (m *memStore) DeleteExpiredFiles(_ context.Context, now time.Time, limit int) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for id, f := range m.files {
+		if n >= int64(limit) {
+			break
+		}
+		if !f.ExpiresAt.After(now) {
+			delete(m.files, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *memStore) ExtendExpiration(_ context.Context, id string, now time.Time, ext, capDur time.Duration) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.files[id]
+	if !ok || !f.ExpiresAt.After(now) {
+		return time.Time{}, store.ErrNotFound
+	}
+	next := f.ExpiresAt.Add(ext)
+	capAt := now.Add(capDur)
+	if next.After(capAt) {
+		next = capAt
+	}
+	f.ExpiresAt = next
+	m.files[id] = f
+	return next, nil
+}
+
 func (m *memStore) Ping(context.Context) error { return nil }
 
 type memCache struct {
-	mu   sync.Mutex
-	urls map[string]string
-	hits int
+	mu     sync.Mutex
+	urls   map[string]string
+	hits   int
+	counts map[string]int64
 }
 
 func (c *memCache) GetURL(_ context.Context, id string) (string, bool) {
@@ -259,7 +436,29 @@ func (c *memCache) SetURL(_ context.Context, id, u string) {
 	c.urls[id] = u
 }
 
+func (c *memCache) Incr(_ context.Context, key string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.counts == nil {
+		c.counts = map[string]int64{}
+	}
+	c.counts[key]++
+	return c.counts[key], nil
+}
+
+func (c *memCache) Expire(context.Context, string, time.Duration) error { return nil }
+
 func (c *memCache) Ping(context.Context) error { return nil }
+
+func testOpts(publicBase string) Options {
+	return Options{
+		PublicBaseURL: publicBase,
+		VisitorSalt:   "test-salt",
+		WebOrigin:     "http://localhost:3000",
+		CookieSecure:  false,
+		Keys:          auth.DeriveKeys("test-app-secret-at-least-32-chars!!"),
+	}
+}
 
 func newTestServer(t *testing.T) (*httptest.Server, *fakeDiscord, *memCache) {
 	return newTestServerWithTokens(t, "test-token")
@@ -272,7 +471,7 @@ func newTestServerWithTokens(t *testing.T, tokens string) (*httptest.Server, *fa
 	dc.BaseURL = discordTS.URL
 	ca := &memCache{urls: map[string]string{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, "", "test-salt")
+	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, testOpts(""))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fake, ca
@@ -321,7 +520,7 @@ func TestUploadLinksUseAPIURL(t *testing.T) {
 	ca := &memCache{urls: map[string]string{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	const public = "https://files.example.com"
-	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, public, "test-salt")
+	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, testOpts(public))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -431,20 +630,14 @@ func TestUploadDownloadRoundTrip(t *testing.T) {
 		t.Error("expected cache hits on second download, got none")
 	}
 
-	// File list includes the upload.
+	// File list requires auth; anonymous uploads are not listed server-side.
 	lr, err := http.Get(ts.URL + "/api/files")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lr.Body.Close()
-	var list struct {
-		Files []store.File `json:"files"`
-	}
-	if err := json.NewDecoder(lr.Body).Decode(&list); err != nil {
-		t.Fatal(err)
-	}
-	if len(list.Files) != 1 || list.Files[0].ID != up.FileID {
-		t.Errorf("list = %+v, want the uploaded file", list.Files)
+	if lr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unauthenticated list status = %d, want 401", lr.StatusCode)
 	}
 }
 
@@ -516,18 +709,17 @@ func TestSingleChunkRedirectsToCDN(t *testing.T) {
 		t.Fatalf("Location = %q, want Discord CDN attachment URL", loc)
 	}
 
-	// ?download=1 keeps proxy so Content-Disposition filename works.
+	// ?download=1 also 302s for single-chunk (after retention extend).
 	dl, err := noFollow.Get(ts.URL + "/f/" + up.FileID + "?download=1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer dl.Body.Close()
-	if dl.StatusCode != http.StatusOK {
-		t.Fatalf("download status = %d, want 200 (proxied)", dl.StatusCode)
+	if dl.StatusCode != http.StatusFound {
+		t.Fatalf("download status = %d, want 302", dl.StatusCode)
 	}
-	got, _ := io.ReadAll(dl.Body)
-	if !bytes.Equal(got, payload) {
-		t.Fatalf("download body = %q, want %q", got, payload)
+	if loc := dl.Header.Get("Location"); !strings.Contains(loc, "/attachments/") {
+		t.Fatalf("download Location = %q, want CDN attachment URL", loc)
 	}
 }
 

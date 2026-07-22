@@ -26,12 +26,17 @@ type FilePart struct {
 
 // File is a stored file: its metadata plus the ordered Discord parts.
 type File struct {
-	ID        string     `json:"fileId"`
-	Name      string     `json:"fileName"`
-	Size      int64      `json:"fileSize"`
-	ChunkSize int64      `json:"chunkSize"`
-	CreatedAt time.Time  `json:"createdAt"`
-	Parts     []FilePart `json:"-"`
+	ID                   string     `json:"fileId"`
+	Name                 string     `json:"fileName"`
+	Size                 int64      `json:"fileSize"`
+	ChunkSize            int64      `json:"chunkSize"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	OwnerUserID          *string    `json:"ownerUserId,omitempty"`
+	Visibility           string     `json:"visibility"`
+	AccessTokenHash      string     `json:"-"`
+	AccessTokenRotatedAt *time.Time `json:"-"`
+	ExpiresAt            time.Time  `json:"expiresAt"`
+	Parts                []FilePart `json:"-"`
 }
 
 type Store struct {
@@ -112,9 +117,24 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO files (id, name, size, chunk_size, created_at) VALUES ($1, $2, $3, $4, $5)`,
-		f.ID, f.Name, f.Size, f.ChunkSize, f.CreatedAt); err != nil {
+	vis := f.Visibility
+	if vis == "" {
+		vis = VisibilityPublic
+	}
+	var tokenHash any
+	if f.AccessTokenHash != "" {
+		tokenHash = f.AccessTokenHash
+	}
+	var rotated any
+	if f.AccessTokenRotatedAt != nil {
+		rotated = *f.AccessTokenRotatedAt
+	}
+	if _, err := tx.Exec(ctx, `
+			INSERT INTO files (id, name, size, chunk_size, created_at, owner_user_id, visibility,
+			                   access_token_hash, access_token_rotated_at, expires_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		f.ID, f.Name, f.Size, f.ChunkSize, f.CreatedAt, f.OwnerUserID, vis,
+		tokenHash, rotated, f.ExpiresAt); err != nil {
 		return fmt.Errorf("insert file: %w", err)
 	}
 	rows := make([][]any, len(f.Parts))
@@ -133,10 +153,11 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 }
 
 func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
-	var f File
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, size, chunk_size, created_at FROM files WHERE id = $1`, id).
-		Scan(&f.ID, &f.Name, &f.Size, &f.ChunkSize, &f.CreatedAt)
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility,
+		       access_token_hash, access_token_rotated_at, expires_at
+		FROM files WHERE id = $1`, id)
+	f, err := scanFileMeta(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return File{}, ErrNotFound
 	}
@@ -162,6 +183,28 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 		return p, nil
 	})
 	return f, err
+}
+
+type scannable interface {
+	Scan(dest ...any) error
+}
+
+func scanFileMeta(row scannable) (File, error) {
+	var f File
+	var owner *string
+	var tokenHash *string
+	var rotated *time.Time
+	err := row.Scan(&f.ID, &f.Name, &f.Size, &f.ChunkSize, &f.CreatedAt,
+		&owner, &f.Visibility, &tokenHash, &rotated, &f.ExpiresAt)
+	if err != nil {
+		return File{}, err
+	}
+	f.OwnerUserID = owner
+	if tokenHash != nil {
+		f.AccessTokenHash = *tokenHash
+	}
+	f.AccessTokenRotatedAt = rotated
+	return f, nil
 }
 
 // Chunk is one entry in the content-addressed chunk store.
@@ -231,15 +274,19 @@ func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chun
 	return out, nil
 }
 
-func (s *Store) ListFiles(ctx context.Context, limit int) ([]File, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, size, chunk_size, created_at FROM files ORDER BY created_at DESC LIMIT $1`, limit)
+// ListFilesByOwner returns files owned by ownerID, newest first.
+func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]File, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility,
+		       access_token_hash, access_token_rotated_at, expires_at
+		FROM files
+		WHERE owner_user_id = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2 OFFSET $3`, ownerID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (File, error) {
-		var f File
-		err := row.Scan(&f.ID, &f.Name, &f.Size, &f.ChunkSize, &f.CreatedAt)
-		return f, err
+		return scanFileMeta(row)
 	})
 }

@@ -6,6 +6,7 @@ import { Cloud } from "lucide-react";
 import { Toaster } from "sonner";
 
 import { HealthBanner } from "@/components/health-banner";
+import { AuthHeader } from "@/components/auth-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
@@ -72,7 +73,8 @@ export default async function RootLayout({
                   API
                 </Link>
               </nav>
-              <div className="ml-auto">
+              <div className="ml-auto flex items-center gap-2">
+                <AuthHeader />
                 <ThemeToggle />
               </div>
             </div>

@@ -2,6 +2,9 @@
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG TARGETPLATFORM
 COPY $TARGETPLATFORM/discloud /discloud
+# Seed /data so a first-mount named volume inherits nonroot ownership.
+COPY --chown=65532:65532 data /data
+WORKDIR /data
 USER nonroot
 EXPOSE 8080
 ENTRYPOINT ["/discloud"]

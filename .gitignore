@@ -11,6 +11,14 @@ coverage.html
 .env.*
 !.env.example
 
+# Auto-generated secrets (cwd / Docker /data)
+.app.secret
+.app.secret.tmp
+.visitor.secret
+.visitor.secret.tmp
+.visitor_hash_salt
+.visitor_hash_salt.tmp
+
 # IDE / local tooling
 .cursor/
 .codegraph/

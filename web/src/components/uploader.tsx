@@ -17,6 +17,7 @@ import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
 import { ShareQR } from "@/components/share-qr";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,7 +26,8 @@ import {
   ProgressLabel,
   ProgressValue,
 } from "@/components/ui/progress";
-import { formatBytes, formatSpeed } from "@/lib/format";
+import { buildInspectPath } from "@/lib/api";
+import { formatBytes, formatDate, formatSpeed } from "@/lib/format";
 import {
   cancelUpload,
   clearDone,
@@ -228,6 +230,18 @@ export function Uploader() {
                 <p className="text-sm text-muted-foreground">
                   {formatBytes(state.lastResult.fileSize)}
                 </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {state.lastResult.visibility && (
+                    <Badge variant="secondary">
+                      {state.lastResult.visibility}
+                    </Badge>
+                  )}
+                  {state.lastResult.expiresAt && (
+                    <span className="text-xs text-muted-foreground">
+                      Expires {formatDate(state.lastResult.expiresAt)}
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
                   {state.lastResult.fileId}
                 </p>
@@ -287,7 +301,7 @@ export function Uploader() {
                 <Download aria-hidden /> Download
               </a>
               <Link
-                href={`/i/${state.lastResult.fileId}`}
+                href={buildInspectPath(state.lastResult.fileId)}
                 className={buttonVariants({ variant: "secondary", size: "sm" })}
               >
                 <Search aria-hidden /> Inspect

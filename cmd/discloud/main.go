@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mewisme/discloud-go/internal/auth"
 	"github.com/mewisme/discloud-go/internal/cache"
 	"github.com/mewisme/discloud-go/internal/config"
 	"github.com/mewisme/discloud-go/internal/discord"
@@ -54,16 +55,22 @@ func run(log *slog.Logger) error {
 	}
 	defer ca.Close()
 
-	dc := discord.New(cfg.DiscordBotToken, cfg.DiscordChannelID)
-	if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
-		return err
-	}
-	salt := cfg.VisitorHashSalt
-	if salt == "" {
-		salt = "discloud:" + cfg.DiscordChannelID
-		log.Warn("VISITOR_HASH_SALT unset; using derived salt — set an explicit salt for stable unique-visitor hashes across deploys")
-	}
-	srv := server.New(log, st, ca, dc, cfg.APIURL, salt)
+		dc := discord.New(cfg.DiscordBotToken, cfg.DiscordChannelID)
+		if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
+			return err
+		}
+		salt, err := config.LoadOrCreateVisitorHashSalt(config.VisitorHashSaltFile)
+		if err != nil {
+			return err
+		}
+		srv := server.New(log, st, ca, dc, server.Options{
+			PublicBaseURL: cfg.APIURL,
+			VisitorSalt:   salt,
+			WebOrigin:     cfg.WebOrigin,
+			CookieSecure:  cfg.CookieSecure,
+			Keys:          auth.DeriveKeys(cfg.AppSecret),
+		})
+		go srv.RunCleanup(ctx)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

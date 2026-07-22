@@ -10,11 +10,11 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -91,14 +91,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f := store.File{
-		ID:        fileID,
-		Name:      fileName,
-		Size:      fileSize,
-		ChunkSize: chunkSize,
-		CreatedAt: time.Now().UTC(),
-		Parts:     parts,
-	}
+	f := s.newOwnedFile(r, fileID, fileName, fileSize, parts)
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		s.log.Error("persist file failed", "file", fileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist file metadata")
@@ -107,11 +100,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	base := s.baseURL(r)
 	s.log.Info("file uploaded", "file", fileName, "size", humanBytes(fileSize), "chunks", len(parts))
-	writeJSON(w, http.StatusOK, fileLinks(base, fileID, fileName, fileSize))
+	writeJSON(w, http.StatusOK, s.fileLinksResponse(r, base, f, ""))
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
-	f, err := s.store.GetFile(r.Context(), r.PathValue("id"))
+	access, err := s.authorizeFileAccess(r, r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
 		if r.URL.Query().Get("json") == "1" {
 			writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
@@ -129,15 +122,21 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	f := access.File
+	if access.ViaToken {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+	}
 
 	if r.URL.Query().Get("json") == "1" {
-		writeJSON(w, http.StatusOK, f)
+		writeJSON(w, http.StatusOK, s.fileMetaDTO(r, f, ""))
 		return
 	}
 
+	isDownload := r.URL.Query().Get("download") == "1"
+	wantExtend := isDownload && r.Method != http.MethodHead && r.Header.Get("Range") == ""
+
 	// Single-chunk + inline: 302 to Discord CDN so file bytes skip our egress.
-	// Multi-chunk still needs proxy stitching; ?download=1 keeps Content-Disposition.
-	if r.URL.Query().Get("download") != "1" && len(f.Parts) == 1 {
+	if !isDownload && len(f.Parts) == 1 {
 		cdnURL, err := s.resolveCDNURL(r.Context(), f.Parts[0])
 		if err != nil {
 			s.log.Error("resolve cdn failed", "file", f.Name, "error", err)
@@ -157,6 +156,24 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Single-chunk + download=1 (no Range): extend then 302.
+	if isDownload && len(f.Parts) == 1 && r.Header.Get("Range") == "" {
+		cdnURL, err := s.resolveCDNURL(r.Context(), f.Parts[0])
+		if err != nil {
+			s.log.Error("resolve cdn failed", "file", f.Name, "error", err)
+			http.Error(w, "Chunk unavailable; re-upload the file", http.StatusBadGateway)
+			return
+		}
+		if wantExtend {
+			s.extendDownload(r.Context(), f.ID)
+		}
+		if r.Method != http.MethodHead {
+			s.trackAsync(f.ID, store.EventDownload, f.Size, r)
+		}
+		http.Redirect(w, r, cdnURL, http.StatusFound)
+		return
+	}
+
 	w.Header().Set("Accept-Ranges", "bytes")
 	ct := mime.TypeByExtension(filepath.Ext(f.Name))
 	if ct == "" {
@@ -164,7 +181,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", ct)
 	disposition := "inline"
-	if r.URL.Query().Get("download") == "1" {
+	if isDownload {
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, f.Name))
@@ -194,6 +211,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Chunk unavailable; re-upload the file", http.StatusBadGateway)
 		return
 	}
+	if wantExtend {
+		s.extendDownload(r.Context(), f.ID)
+	}
 
 	w.Header().Set("Content-Length", strconv.FormatInt(full.end-full.start+1, 10))
 	w.WriteHeader(status)
@@ -214,6 +234,12 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("stream part failed", "file", f.Name, "part", span.idx, "error", err)
 			return
 		}
+	}
+}
+
+func (s *Server) extendDownload(ctx context.Context, fileID string) {
+	if _, err := s.store.ExtendExpiration(ctx, fileID, s.now().UTC(), downloadExtension, maxRetentionFromNow); err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.log.Error("extend expiration failed", "file", fileID, "error", err)
 	}
 }
 
@@ -281,20 +307,38 @@ func (s *Server) streamPart(w http.ResponseWriter, r *http.Request, part store.F
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
-	files, err := s.store.ListFiles(r.Context(), listLimit)
+	u, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	limit := listLimit
+	offset := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	files, err := s.store.ListFilesByOwner(r.Context(), u.ID, limit, offset)
 	if err != nil {
 		s.log.Error("list files failed", "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to list files")
 		return
 	}
-	if files == nil {
-		files = []store.File{}
+	out := make([]map[string]any, 0, len(files))
+	base := s.baseURL(r)
+	for _, f := range files {
+		out = append(out, s.fileLinksResponse(r, base, f, ""))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+	writeJSON(w, http.StatusOK, map[string]any{"files": out})
 }
 
 func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
-	f, err := s.store.GetFile(r.Context(), r.PathValue("id"))
+	access, err := s.authorizeFileAccess(r, r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
 		return
@@ -303,7 +347,17 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	writeJSON(w, http.StatusOK, f)
+	if access.ViaToken {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+	}
+	token := ""
+	if access.ViaToken {
+		token = r.URL.Query().Get("token")
+		if token == "" {
+			token = r.Header.Get("X-File-Token")
+		}
+	}
+	writeJSON(w, http.StatusOK, s.fileMetaDTO(r, access.File, token))
 }
 
 func (s *Server) baseURL(r *http.Request) string {
@@ -319,16 +373,100 @@ func (s *Server) baseURL(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-// fileLinks builds share/download URLs from API_URL (or request host).
+// newOwnedFile builds a File with ownership and retention from the optional session.
+func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, parts []store.FilePart) store.File {
+	now := s.now().UTC()
+	f := store.File{
+		ID:         id,
+		Name:       name,
+		Size:       size,
+		ChunkSize:  chunkSize,
+		CreatedAt:  now,
+		Visibility: store.VisibilityPublic,
+		ExpiresAt:  now.Add(anonymousRetention),
+		Parts:      parts,
+	}
+	if u, ok := s.sessionUser(r); ok {
+		uid := u.ID
+		f.OwnerUserID = &uid
+		f.ExpiresAt = now.Add(authenticatedRetention)
+	}
+	return f
+}
+
+func (s *Server) ownedByCurrentUser(r *http.Request, f store.File) bool {
+	u, ok := s.sessionUser(r)
+	if !ok || f.OwnerUserID == nil {
+		return false
+	}
+	return *f.OwnerUserID == u.ID
+}
+
+func (s *Server) fileMetaDTO(r *http.Request, f store.File, rawToken string) map[string]any {
+	base := s.baseURL(r)
+	return s.fileLinksResponse(r, base, f, rawToken)
+}
+
+// fileLinksResponse builds share/download URLs; rawToken is appended for private links.
+func (s *Server) fileLinksResponse(r *http.Request, base string, f store.File, rawToken string) map[string]any {
+	urlPath := withToken(base+"/f/"+f.ID, rawToken)
+	longPath := withToken(base+"/f/"+f.ID+"/"+f.Name, rawToken)
+	dl := withTokenQuery(base+"/f/"+f.ID, "download", "1", rawToken)
+	longDL := withTokenQuery(base+"/f/"+f.ID+"/"+f.Name, "download", "1", rawToken)
+	return map[string]any{
+		"fileId":             f.ID,
+		"fileName":           f.Name,
+		"fileSize":           f.Size,
+		"chunkSize":          f.ChunkSize,
+		"visibility":         f.Visibility,
+		"ownedByCurrentUser": s.ownedByCurrentUser(r, f),
+		"createdAt":          f.CreatedAt,
+		"expiresAt":          f.ExpiresAt,
+		"url":                urlPath,
+		"longURL":            longPath,
+		"downloadURL":        dl,
+		"longDownloadURL":    longDL,
+	}
+}
+
+func withToken(rawURL, token string) string {
+	if token == "" {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set("token", token)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func withTokenQuery(rawURL, k, v, token string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set(k, v)
+	if token != "" {
+		q.Set("token", token)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// fileLinks builds share/download URLs (legacy helper for callers without ownership fields).
 func fileLinks(base, fileID, fileName string, fileSize int64) map[string]any {
 	return map[string]any{
 		"fileId":          fileID,
 		"fileName":        fileName,
 		"fileSize":        fileSize,
-		"url":             fmt.Sprintf("%s/f/%s", base, fileID),
-		"longURL":         fmt.Sprintf("%s/f/%s/%s", base, fileID, fileName),
-		"downloadURL":     fmt.Sprintf("%s/f/%s?download=1", base, fileID),
-		"longDownloadURL": fmt.Sprintf("%s/f/%s/%s?download=1", base, fileID, fileName),
+		"url":             base + "/f/" + fileID,
+		"longURL":         base + "/f/" + fileID + "/" + fileName,
+		"downloadURL":     withTokenQuery(base+"/f/"+fileID, "download", "1", ""),
+		"longDownloadURL": withTokenQuery(base+"/f/"+fileID+"/"+fileName, "download", "1", ""),
 	}
 }
 

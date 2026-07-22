@@ -36,6 +36,20 @@ func (c *Cache) Ping(ctx context.Context) error {
 	return c.client.Do(ctx, c.client.B().Ping().Build()).Error()
 }
 
+// Incr increments a key by 1 and returns the new value.
+func (c *Cache) Incr(ctx context.Context, key string) (int64, error) {
+	return c.client.Do(ctx, c.client.B().Incr().Key(key).Build()).AsInt64()
+}
+
+// Expire sets a TTL on key.
+func (c *Cache) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	sec := int64(ttl.Seconds())
+	if sec < 1 {
+		sec = 1
+	}
+	return c.client.Do(ctx, c.client.B().Expire().Key(key).Seconds(sec).Build()).Error()
+}
+
 func (c *Cache) GetURL(ctx context.Context, messageID string) (string, bool) {
 	v, err := c.client.Do(ctx, c.client.B().Get().Key(key(messageID)).Build()).ToString()
 	return v, err == nil && v != ""

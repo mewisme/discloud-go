@@ -15,7 +15,10 @@ let workersPromise: Promise<number> | null = null;
 /** Parallel chunk POSTs — sized from GET /api/info.workers. */
 export async function uploadWorkers(): Promise<number> {
   if (!workersPromise) {
-    workersPromise = fetch(apiURL("/api/info"), { cache: "no-store" })
+    workersPromise = fetch(apiURL("/api/info"), {
+      cache: "no-store",
+      credentials: "include",
+    })
       .then(async (res) => {
         if (!res.ok) return DEFAULT_WORKERS;
         const body = (await res.json()) as { workers?: unknown };
@@ -73,6 +76,7 @@ export async function uploadFileChunked(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileName: file.name, chunkHashes: hashes }),
+    credentials: "include",
     signal,
   });
   if (!res.ok) {
@@ -95,6 +99,7 @@ async function uploadChunkWithRetry(
       // Skip the upload entirely if the server already has these bytes.
       const check = await fetch(apiURL(`/api/chunks/${hash}`), {
         method: "HEAD",
+        credentials: "include",
         signal,
       });
       if (check.ok) return hash;
@@ -129,6 +134,7 @@ function postChunk(
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     xhr.open("POST", apiURL("/api/chunks"));
+    xhr.withCredentials = true;
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onChunkProgress(e.loaded);
     };

@@ -12,11 +12,16 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set in .env}
       DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:?set in .env}
       API_URL: ${API_URL:-http://localhost:8080}
-      VISITOR_HASH_SALT: ${VISITOR_HASH_SALT:-}
+      # Optional — if unset, API auto-generates /data/.app.secret
+      APP_SECRET: ${APP_SECRET:-}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       GOMEMLIMIT: 96MiB
       GOGC: "50"
     ports:
       - "8080:8080"
+    volumes:
+      # Persists .app.secret + .visitor.secret (WORKDIR /data).
+      - data:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,3 +123,5 @@ networks:
 volumes:
   pgdata:
     name: discloud-pgdata
+  data:
+    name: discloud-data

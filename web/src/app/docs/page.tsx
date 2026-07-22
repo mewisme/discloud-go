@@ -13,10 +13,13 @@ const methodVariant: Record<string, string> = {
   GET: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   HEAD: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
   POST: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  PATCH: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  DELETE: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
 };
 
 const toc = [
   { id: "base", label: "Base URL" },
+  { id: "auth", label: "Auth" },
   { id: "upload", label: "Upload" },
   { id: "chunked", label: "Chunked upload" },
   { id: "download", label: "Download" },
@@ -100,8 +103,10 @@ export default function DocsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">API reference</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Plain HTTP, no auth. The web UI talks to this API; you can too with{" "}
-            <code className="font-mono text-foreground">curl</code>.
+            Plain HTTP. Optional email/password sessions (
+            <code className="font-mono text-foreground">discloud_session</code>
+            ). Browser clients must send credentials and match{" "}
+            <code className="font-mono text-foreground">WEB_ORIGIN</code>.
           </p>
         </header>
 
@@ -114,12 +119,49 @@ export default function DocsPage() {
           <DocsCode>{`export BASE=$BASE`}</DocsCode>
         </section>
 
+        <section id="auth" className="scroll-mt-24 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold tracking-tight">Auth</h2>
+            <p className="text-sm text-muted-foreground">
+              Cookie session. First signup on a fresh DB becomes{" "}
+              <code>admin</code>; later accounts are <code>user</code>. Password
+              min 8 chars.
+            </p>
+          </div>
+
+          <Endpoint method="POST" path="/api/auth/signup">
+            <DocsCode>{`curl -X POST -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
+  -c cookies.txt -d '{"email":"you@example.com","password":"secret123"}' \\
+  "$BASE/api/auth/signup"
+# → { "id", "email", "role" } + Set-Cookie: discloud_session=…`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="POST" path="/api/auth/signin">
+            <p>Same body as signup. Invalid credentials → 401.</p>
+            <DocsCode>{`curl -X POST -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
+  -c cookies.txt -d '{"email":"you@example.com","password":"secret123"}' \\
+  "$BASE/api/auth/signin"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="POST" path="/api/auth/signout">
+            <p>Clears the session cookie. 204.</p>
+            <DocsCode>{`curl -X POST -H "Origin: http://localhost:3000" -b cookies.txt \\
+  "$BASE/api/auth/signout"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="GET" path="/api/auth/me">
+            <p>Current user, or 401.</p>
+            <DocsCode>{`curl -s -b cookies.txt "$BASE/api/auth/me"`}</DocsCode>
+          </Endpoint>
+        </section>
+
         <section id="upload" className="scroll-mt-24 space-y-4">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-tight">Upload</h2>
             <p className="text-sm text-muted-foreground">
               One request for small/medium files. Body = raw bytes. Server splits
-              into 8&nbsp;MB chunks.
+              into 8&nbsp;MB chunks. Public by default. With a session cookie,
+              the file is owned (30-day retention); anonymous = 7 days.
             </p>
           </div>
 
@@ -136,6 +178,11 @@ export default function DocsPage() {
   "fileId": "894d9eec70b09280134933c50b168592",
   "fileName": "video.mp4",
   "fileSize": 10485760,
+  "chunkSize": 8388608,
+  "visibility": "public",
+  "ownedByCurrentUser": false,
+  "createdAt": "…",
+  "expiresAt": "…",
   "url": "$BASE/f/894d9eec…",
   "longURL": "$BASE/f/894d9eec…/video.mp4",
   "downloadURL": "$BASE/f/894d9eec…?download=1",
@@ -156,7 +203,8 @@ export default function DocsPage() {
             <p className="text-sm text-muted-foreground">
               Any size, resumable. Split into <strong>8&nbsp;MB</strong> pieces
               (last chunk may be shorter). Each chunk is keyed by SHA-256 — skip
-              uploads the server already has.
+              uploads the server already has. Send credentials on complete so
+              ownership attaches when signed in.
             </p>
           </div>
 
@@ -207,7 +255,8 @@ printf '%s\\n' "\${hashes[@]}" | jq -R . | jq -s \\
             <h2 className="text-lg font-semibold tracking-tight">Download</h2>
             <p className="text-sm text-muted-foreground">
               Stream bytes, force download, or fetch metadata. Single-chunk
-              inline views may redirect to the CDN.
+              responses may redirect to the CDN. Private files need a session
+              (owner/admin) or <code>?token=</code> / <code>X-File-Token</code>.
             </p>
           </div>
 
@@ -218,11 +267,14 @@ printf '%s\\n' "\${hashes[@]}" | jq -R . | jq -s \\
                 URLs).
               </li>
               <li>
-                <code>?download=1</code> →{" "}
-                <code>Content-Disposition: attachment</code>
+                <code>?download=1</code> → attachment disposition; extends
+                retention (not HEAD, not Range)
               </li>
               <li>
                 <code>?json=1</code> → metadata JSON (no file bytes)
+              </li>
+              <li>
+                <code>?token=</code> → private file access token
               </li>
               <li>
                 <code>Range</code> → 206; open-ended ranges capped at 5&nbsp;MB
@@ -230,9 +282,11 @@ printf '%s\\n' "\${hashes[@]}" | jq -R . | jq -s \\
             </ul>
             <DocsCode>{`curl -OJ "$BASE/f/<id>/video.mp4?download=1"
 curl -s "$BASE/f/<id>?json=1"
-curl -H "Range: bytes=0-1023" "$BASE/f/<id>"`}</DocsCode>
+curl -H "Range: bytes=0-1023" "$BASE/f/<id>"
+curl -s "$BASE/f/<id>?token=<accessToken>&json=1"`}</DocsCode>
             <p>
-              <strong>Errors:</strong> 404 unknown id · 416 bad range.
+              <strong>Errors:</strong> 404 unknown / expired / unauthorized
+              private · 416 bad range.
             </p>
           </Endpoint>
         </section>
@@ -245,22 +299,63 @@ curl -H "Range: bytes=0-1023" "$BASE/f/<id>"`}</DocsCode>
           </div>
 
           <Endpoint method="GET" path="/api/files">
-            <p>50 most recent uploads, newest first.</p>
-            <DocsCode>{`curl -s "$BASE/api/files"
-# { "files": [{ "fileId", "fileName", "fileSize", "chunkSize", "createdAt" }] }`}</DocsCode>
+            <p>
+              <strong>Auth required.</strong> Files owned by the current user
+              (paginated <code>limit</code>/<code>offset</code>).
+            </p>
+            <DocsCode>{`curl -s -b cookies.txt "$BASE/api/files"
+# { "files": [{ "fileId", "fileName", "visibility", "expiresAt", … }] }`}</DocsCode>
           </Endpoint>
 
           <Endpoint method="GET" path="/api/files/{fileId}">
-            <p>One file’s metadata. 404 if unknown.</p>
-            <DocsCode>{`curl -s "$BASE/api/files/<id>"`}</DocsCode>
+            <p>
+              One file’s metadata. Private: owner/admin session or token. 404 if
+              unknown / denied / expired.
+            </p>
+            <DocsCode>{`curl -s "$BASE/api/files/<id>"
+curl -s "$BASE/api/files/<id>?token=<accessToken>"`}</DocsCode>
           </Endpoint>
 
           <Endpoint method="GET" path="/api/files/{fileId}/inspect">
             <p>
               Analytics (views, downloads, ranges, bytes served, unique visitors)
-              plus share URLs. UI: <code>/i/{"{fileId}"}</code>.
+              plus share URLs. Same authz as metadata. UI:{" "}
+              <code>/i/{"{fileId}"}</code>.
             </p>
             <DocsCode>{`curl -s "$BASE/api/files/<id>/inspect"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="PATCH" path="/api/files/{fileId}/visibility">
+            <p>
+              Owner or admin. Body:{" "}
+              <code>{`{ "visibility": "public" | "private" }`}</code>. Private
+              returns a one-time <code>accessToken</code> (shown once — rotate to
+              recover). Anonymous-owned files cannot go private (403). Public
+              clears the token.
+            </p>
+            <DocsCode>{`curl -X PATCH -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
+  -b cookies.txt -d '{"visibility":"private"}' \\
+  "$BASE/api/files/<id>/visibility"
+# → { "visibility": "private", "accessToken": "…" }`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="POST" path="/api/files/{fileId}/access-token/rotate">
+            <p>
+              Owner or admin; private files only. Returns a new one-time{" "}
+              <code>accessToken</code>; old token stops working.
+            </p>
+            <DocsCode>{`curl -X POST -H "Origin: http://localhost:3000" -b cookies.txt \\
+  "$BASE/api/files/<id>/access-token/rotate"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="DELETE" path="/api/files/{fileId}">
+            <p>
+              Owner or admin. <strong>204</strong>. Deletes Postgres metadata
+              only — Discord attachments are untouched. File tokens cannot
+              delete.
+            </p>
+            <DocsCode>{`curl -X DELETE -H "Origin: http://localhost:3000" -b cookies.txt \\
+  "$BASE/api/files/<id>"`}</DocsCode>
           </Endpoint>
 
           <Endpoint method="GET" path="/api/info">
@@ -306,7 +401,23 @@ curl -H "Range: bytes=0-1023" "$BASE/f/<id>"`}</DocsCode>
               CDN URLs are refreshed on download so share links stay valid
             </li>
             <li>
-              CORS allows browser clients from any origin for GET/HEAD/POST
+              CORS allowlists exact <code className="font-mono text-foreground">WEB_ORIGIN</code>{" "}
+              with credentials. Mutating requests with a session cookie (or with
+              an <code>Origin</code> header) must match that origin.
+            </li>
+            <li>
+              <code className="font-mono text-foreground">SameSite=Lax</code> cookies
+              need API + UI same-site (path proxy in prod; localhost ports OK).
+            </li>
+            <li>
+              Retention: anonymous 7d, authenticated 30d;{" "}
+              <code>?download=1</code> extends by 7d (cap 30d from now). Cleanup
+              deletes expired Postgres rows only.
+            </li>
+            <li>
+              Private denials are uniform <strong>404</strong> (no existence leak).
+              Token-authenticated responses set{" "}
+              <code>Referrer-Policy: no-referrer</code>.
             </li>
           </ul>
         </section>
