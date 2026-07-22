@@ -758,13 +758,24 @@ func TestUploadValidation(t *testing.T) {
 
 func TestDownloadNotFound(t *testing.T) {
 	ts, _, _ := newTestServer(t)
-	resp, err := http.Get(ts.URL + "/f/does-not-exist")
+	// Valid UUIDv7 hex that is not in the store → 404.
+	missingID := "019f8a8d908a765f855a54f9e3b92f79"
+	resp, err := http.Get(ts.URL + "/f/" + missingID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+
+	bad, err := http.Get(ts.URL + "/f/does-not-exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Errorf("invalid id status = %d, want 400", bad.StatusCode)
 	}
 }
 
@@ -855,7 +866,7 @@ func TestDownloadJSON(t *testing.T) {
 		t.Fatalf("meta = %+v", body)
 	}
 
-	missing, err := http.Get(ts.URL + "/f/nope?json=1")
+	missing, err := http.Get(ts.URL + "/f/019f8a8d908a765f855a54f9e3b92f79?json=1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,11 +6,17 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// uuidHex normalizes a Postgres uuid text scan (dashed) to 32-char lowercase hex.
+func uuidHex(s string) string {
+	return strings.ReplaceAll(s, "-", "")
+}
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
@@ -199,7 +205,11 @@ func scanFileMeta(row scannable) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
-	f.OwnerUserID = owner
+	f.ID = uuidHex(f.ID)
+	if owner != nil {
+		h := uuidHex(*owner)
+		f.OwnerUserID = &h
+	}
 	if tokenHash != nil {
 		f.AccessTokenHash = *tokenHash
 	}

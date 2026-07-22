@@ -112,7 +112,11 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, e
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
-	return u, err
+	if err != nil {
+		return User{}, err
+	}
+	u.ID = uuidHex(u.ID)
+	return u, nil
 }
 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -125,7 +129,11 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
-	return u, err
+	if err != nil {
+		return User{}, err
+	}
+	u.ID = uuidHex(u.ID)
+	return u, nil
 }
 
 func (s *Store) CreateSession(ctx context.Context, sess Session) error {
@@ -154,7 +162,11 @@ func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash string, now 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
-	return u, err
+	if err != nil {
+		return User{}, err
+	}
+	u.ID = uuidHex(u.ID)
+	return u, nil
 }
 
 // GetSessionByTokenHash returns a still-valid session by token hash.
@@ -169,7 +181,12 @@ func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string, now
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
-	return sess, err
+	if err != nil {
+		return Session{}, err
+	}
+	sess.ID = uuidHex(sess.ID)
+	sess.UserID = uuidHex(sess.UserID)
+	return sess, nil
 }
 
 // TouchSession updates last_seen_at, ip, and user_agent for an active session.

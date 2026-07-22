@@ -328,9 +328,13 @@ type fileAccess struct {
 }
 
 // authorizeFileAccess is the single gate for all file-read paths.
-// Denials are uniform 404 (ErrNotFound).
+// Denials are uniform 404 (ErrNotFound). Invalid ids are errInvalidID (400).
 func (s *Server) authorizeFileAccess(r *http.Request, id string) (fileAccess, error) {
-	f, err := s.store.GetFile(r.Context(), id)
+	parsed, err := parseID(id)
+	if err != nil {
+		return fileAccess{}, errInvalidID
+	}
+	f, err := s.store.GetFile(r.Context(), parsed)
 	if err != nil {
 		return fileAccess{}, err
 	}
@@ -379,7 +383,11 @@ func (s *Server) handleVisibility(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := r.PathValue("id")
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+		return
+	}
 	f, err := s.store.GetFile(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
@@ -441,7 +449,11 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := r.PathValue("id")
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+		return
+	}
 	f, err := s.store.GetFile(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
@@ -475,7 +487,11 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := r.PathValue("id")
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+		return
+	}
 	f, err := s.store.GetFile(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")

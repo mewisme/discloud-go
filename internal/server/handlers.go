@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/mewisme/discloud-go/internal/auth"
@@ -111,6 +111,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	access, err := s.authorizeFileAccess(r, r.PathValue("id"))
+	if errors.Is(err, errInvalidID) {
+		if r.URL.Query().Get("json") == "1" {
+			writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+			return
+		}
+		http.Error(w, "Invalid file id", http.StatusBadRequest)
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		if r.URL.Query().Get("json") == "1" {
 			writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
@@ -341,6 +349,10 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 	access, err := s.authorizeFileAccess(r, r.PathValue("id"))
+	if errors.Is(err, errInvalidID) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
 		return
@@ -498,10 +510,23 @@ func fileLinks(base, fileID, fileName string, fileSize int64) map[string]any {
 }
 
 func newID() string {
-	b := make([]byte, 16)
-	rand.Read(b) // never fails per crypto/rand docs
-	return hex.EncodeToString(b)
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err) // NewV7 only fails if rand fails
+	}
+	return hex.EncodeToString(id[:])
 }
+
+// parseID accepts dashed or hex UUID forms and returns 32-char lowercase hex.
+func parseID(s string) (string, error) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
+}
+
+var errInvalidID = errors.New("invalid file id")
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

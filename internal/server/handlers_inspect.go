@@ -8,8 +8,16 @@ import (
 )
 
 func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+		return
+	}
 	access, err := s.authorizeFileAccess(r, id)
+	if errors.Is(err, errInvalidID) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid file id")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
 		return
