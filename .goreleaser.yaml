@@ -35,9 +35,20 @@ builds:
       - -s -w -X main.version={{ .Version }}
 
 archives:
+  # Server binary (linux only — matches builds.discloud).
+  - id: discloud
+    ids: [discloud]
+    formats: [tar.gz]
+    name_template: "discloud_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+  # CLI client (multi-OS). Name must differ from project_name default.
   - id: discloud-cli
     ids: [discloud-cli]
     formats: [tar.gz]
+    name_template: "discloud-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
