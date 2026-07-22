@@ -157,6 +157,7 @@ function redactResult(r: UploadResult): UploadResult {
     fileName: r.fileName,
     fileSize: r.fileSize,
     visibility: r.visibility,
+    status: r.status,
     ownedByCurrentUser: r.ownedByCurrentUser,
     createdAt: r.createdAt,
     expiresAt: r.expiresAt,

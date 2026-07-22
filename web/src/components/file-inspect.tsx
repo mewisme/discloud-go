@@ -140,6 +140,11 @@ export function FileInspectPanel({
             {data.fileId}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Badge
+              variant={data.status === "duplicate" ? "outline" : "secondary"}
+            >
+              {data.status ?? "ready"}
+            </Badge>
             {data.visibility && (
               <Badge variant="secondary">{data.visibility}</Badge>
             )}

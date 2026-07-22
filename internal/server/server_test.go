@@ -131,6 +131,9 @@ func (m *memStore) CreateFile(_ context.Context, f store.File) error {
 	if f.Visibility == "" {
 		f.Visibility = store.VisibilityPublic
 	}
+	if f.Status == "" {
+		f.Status = store.FileStatusReady
+	}
 	m.files[f.ID] = f
 	m.ensureStats(f.ID)
 	return nil
@@ -144,6 +147,57 @@ func (m *memStore) GetFile(_ context.Context, id string) (store.File, error) {
 		return store.File{}, store.ErrNotFound
 	}
 	return f, nil
+}
+
+func (m *memStore) FindFileByNameAndParts(_ context.Context, ownerUserID *string, name string, messageIDs []string, now time.Time) (store.File, error) {
+	if ownerUserID == nil || *ownerUserID == "" || len(messageIDs) == 0 {
+		return store.File{}, store.ErrNotFound
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var best store.File
+	found := false
+	for _, f := range m.files {
+		if f.Name != name || !f.ExpiresAt.After(now) {
+			continue
+		}
+		if f.OwnerUserID == nil || *f.OwnerUserID != *ownerUserID {
+			continue
+		}
+		if len(f.Parts) != len(messageIDs) {
+			continue
+		}
+		match := true
+		for i, id := range messageIDs {
+			if f.Parts[i].MessageID != id {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		if !found || f.CreatedAt.After(best.CreatedAt) || (f.CreatedAt.Equal(best.CreatedAt) && f.ID > best.ID) {
+			best = f
+			found = true
+		}
+	}
+	if !found {
+		return store.File{}, store.ErrNotFound
+	}
+	return best, nil
+}
+
+func (m *memStore) UpdateFileStatus(_ context.Context, id, status string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.files[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	f.Status = status
+	m.files[id] = f
+	return nil
 }
 
 func (m *memStore) ListFilesByOwner(_ context.Context, ownerID string, limit, offset int) ([]store.File, error) {

@@ -60,6 +60,7 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		"createdAt":          info.CreatedAt,
 		"expiresAt":          info.ExpiresAt,
 		"visibility":         info.Visibility,
+		"status":             fileStatusOrReady(info.Status),
 		"ownedByCurrentUser": links["ownedByCurrentUser"],
 		"views":              info.Views,
 		"downloads":          info.Downloads,

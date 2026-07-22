@@ -373,6 +373,7 @@ func toUIFiles(files []FileItem) []ui.File {
 			ID:         f.FileID,
 			Name:       f.FileName,
 			Size:       f.FileSize,
+			Status:     f.Status,
 			Visibility: f.Visibility,
 			Expires:    f.ExpiresAt,
 		}
@@ -390,6 +391,7 @@ func toUIInspect(item InspectResponse) ui.Inspect {
 		CreatedAt:       item.CreatedAt,
 		ExpiresAt:       item.ExpiresAt,
 		Visibility:      item.Visibility,
+		Status:          item.Status,
 		Views:           item.Views,
 		Downloads:       item.Downloads,
 		Ranges:          item.Ranges,

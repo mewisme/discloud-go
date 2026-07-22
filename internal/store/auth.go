@@ -22,6 +22,12 @@ const (
 	VisibilityPrivate = "private"
 )
 
+// File status values for files.status (upload outcome badge).
+const (
+	FileStatusReady     = "ready"
+	FileStatusDuplicate = "duplicate"
+)
+
 // ErrConflict is returned for unique constraint violations (e.g. username).
 var ErrConflict = errors.New("conflict")
 

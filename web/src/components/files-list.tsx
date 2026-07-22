@@ -129,6 +129,19 @@ function ownedColumns(actions: OwnedActions): ColumnDef<OwnedFile>[] {
       cell: ({ row }) => formatBytes(row.original.fileSize),
     },
     {
+      accessorKey: "status",
+      header: "Status",
+      meta: { headerClassName: "w-28", className: "w-28" },
+      cell: ({ row }) => {
+        const status = row.original.status ?? "ready";
+        return (
+          <Badge variant={status === "duplicate" ? "outline" : "secondary"}>
+            {status}
+          </Badge>
+        );
+      },
+    },
+    {
       accessorKey: "visibility",
       header: "Visibility",
       meta: { headerClassName: "w-28", className: "w-28" },

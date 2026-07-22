@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -125,6 +126,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	// Range math requires every chunk except the last to be exactly chunkSize.
 	var fileSize int64
 	parts := make([]store.FilePart, len(req.ChunkHashes))
+	messageIDs := make([]string, len(req.ChunkHashes))
 	for i, h := range req.ChunkHashes {
 		c, ok := known[h]
 		if !ok {
@@ -138,9 +140,35 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		}
 		fileSize += c.Size
 		parts[i] = store.FilePart{MessageID: c.MessageID, BotID: c.BotID}
+		messageIDs[i] = c.MessageID
 	}
 
-	f, rawToken, err := s.newOwnedFile(r, newID(), formatFileName(req.FileName), fileSize, parts)
+	name := formatFileName(req.FileName)
+	// Same logged-in user + same name + same chunks → reuse. Other users ignored.
+	if u, ok := s.sessionUser(r); ok {
+		uid := u.ID
+		existing, err := s.store.FindFileByNameAndParts(r.Context(), &uid, name, messageIDs, s.now().UTC())
+		if err == nil {
+			if existing.Status != store.FileStatusDuplicate {
+				if err := s.store.UpdateFileStatus(r.Context(), existing.ID, store.FileStatusDuplicate); err != nil {
+					s.log.Error("mark duplicate failed", "file", existing.ID, "error", err)
+					writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+					return
+				}
+				existing.Status = store.FileStatusDuplicate
+			}
+			s.log.Info("file reused", "file", existing.Name, "id", existing.ID, "chunks", len(parts))
+			s.writeFileCreated(w, r, existing, "")
+			return
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			s.log.Error("file dedupe lookup failed", "file", name, "error", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+
+	f, rawToken, err := s.newOwnedFile(r, newID(), name, fileSize, parts)
 	if err != nil {
 		s.log.Error("prepare file failed", "file", req.FileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to prepare file metadata")

@@ -129,6 +129,38 @@ func TestChunkedUploadFlow(t *testing.T) {
 	}
 }
 
+func TestUploadCompleteAnonymousAlwaysCreates(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	data := []byte("anon-dedupe")
+	cr := postChunk(t, ts.URL, data)
+	hashes := []string{cr.Hash}
+
+	resp1, body1 := completeUpload(t, ts.URL, "Same Name.bin", hashes)
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first complete status = %d: %s", resp1.StatusCode, body1)
+	}
+	var first struct {
+		FileID string `json:"fileId"`
+	}
+	if err := json.Unmarshal(body1, &first); err != nil {
+		t.Fatal(err)
+	}
+
+	resp2, body2 := completeUpload(t, ts.URL, "Same Name.bin", hashes)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second complete status = %d: %s", resp2.StatusCode, body2)
+	}
+	var second struct {
+		FileID string `json:"fileId"`
+	}
+	if err := json.Unmarshal(body2, &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.FileID == first.FileID {
+		t.Fatal("anonymous uploads must not reuse another anonymous file id")
+	}
+}
+
 func TestChunkedUploadValidation(t *testing.T) {
 	ts, _, _ := newTestServer(t)
 

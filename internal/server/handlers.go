@@ -399,6 +399,7 @@ func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, part
 		ChunkSize:  chunkSize,
 		CreatedAt:  now,
 		Visibility: store.VisibilityPublic,
+		Status:     store.FileStatusReady,
 		ExpiresAt:  now.Add(anonymousRetention),
 		Parts:      parts,
 	}
@@ -459,6 +460,7 @@ func (s *Server) fileLinksResponse(base string, f store.File, rawToken string, v
 		"fileSize":           f.Size,
 		"chunkSize":          f.ChunkSize,
 		"visibility":         f.Visibility,
+		"status":             fileStatusOrReady(f.Status),
 		"ownedByCurrentUser": ownedByUser(viewer, f),
 		"createdAt":          f.CreatedAt,
 		"expiresAt":          f.ExpiresAt,
@@ -467,6 +469,13 @@ func (s *Server) fileLinksResponse(base string, f store.File, rawToken string, v
 		"downloadURL":        dl,
 		"longDownloadURL":    longDL,
 	}
+}
+
+func fileStatusOrReady(status string) string {
+	if status == "" {
+		return store.FileStatusReady
+	}
+	return status
 }
 
 func withToken(rawURL, token string) string {

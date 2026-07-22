@@ -19,6 +19,8 @@ import (
 type Store interface {
 	CreateFile(ctx context.Context, f store.File) error
 	GetFile(ctx context.Context, id string) (store.File, error)
+	FindFileByNameAndParts(ctx context.Context, ownerUserID *string, name string, messageIDs []string, now time.Time) (store.File, error)
+	UpdateFileStatus(ctx context.Context, id, status string) error
 	ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]store.File, error)
 	HasChunk(ctx context.Context, hash string) (bool, error)
 	PutChunk(ctx context.Context, c store.Chunk) error

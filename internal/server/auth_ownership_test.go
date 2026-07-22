@@ -1040,3 +1040,83 @@ func TestChunkedCompleteWithSessionPrivateDefault(t *testing.T) {
 		t.Fatalf("ownedByCurrentUser = %v", out["ownedByCurrentUser"])
 	}
 }
+
+func TestUploadCompleteReusesOnlyForSameUser(t *testing.T) {
+	e := newAuthEnv(t)
+	alice, _ := e.signup(t, "alice", "password1")
+	bob, _ := e.signup(t, "bob", "password2")
+
+	data := []byte("same-bytes")
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+
+	post := func(cookie string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/chunks", bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/octet-stream")
+		if cookie != "" {
+			req.Header.Set("Cookie", sessionCookieName+"="+cookie)
+			req.Header.Set("Origin", testWebOrigin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("chunk status = %d", resp.StatusCode)
+		}
+	}
+	complete := func(cookie string) (fileID, status string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"fileName": "dup.bin", "chunkHashes": []string{hash}})
+		req, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/upload/complete", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", sessionCookieName+"="+cookie)
+		req.Header.Set("Origin", testWebOrigin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("complete status = %d: %s", resp.StatusCode, b)
+		}
+		out := decodeJSON[map[string]any](t, resp)
+		id, _ := out["fileId"].(string)
+		if id == "" {
+			t.Fatal("missing fileId")
+		}
+		st, _ := out["status"].(string)
+		return id, st
+	}
+
+	post(alice)
+	alice1, st1 := complete(alice)
+	if st1 != "ready" {
+		t.Fatalf("first upload status = %q, want ready", st1)
+	}
+	alice2, st2 := complete(alice)
+	if alice2 != alice1 {
+		t.Fatalf("same user re-upload: got %s, want reused %s", alice2, alice1)
+	}
+	if st2 != "duplicate" {
+		t.Fatalf("status = %q, want duplicate", st2)
+	}
+
+	post(bob)
+	bob1, bobStatus := complete(bob)
+	if bob1 == alice1 {
+		t.Fatal("different user must not reuse the other user's file id")
+	}
+	if bobStatus != "ready" {
+		t.Fatalf("other user status = %q, want ready", bobStatus)
+	}
+}

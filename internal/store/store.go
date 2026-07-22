@@ -39,6 +39,7 @@ type File struct {
 	CreatedAt            time.Time  `json:"createdAt"`
 	OwnerUserID          *string    `json:"ownerUserId,omitempty"`
 	Visibility           string     `json:"visibility"`
+	Status               string     `json:"status"`
 	AccessTokenHash      string     `json:"-"`
 	AccessTokenRotatedAt *time.Time `json:"-"`
 	ExpiresAt            time.Time  `json:"expiresAt"`
@@ -127,6 +128,10 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 	if vis == "" {
 		vis = VisibilityPublic
 	}
+	status := f.Status
+	if status == "" {
+		status = FileStatusReady
+	}
 	var tokenHash any
 	if f.AccessTokenHash != "" {
 		tokenHash = f.AccessTokenHash
@@ -136,10 +141,10 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 		rotated = *f.AccessTokenRotatedAt
 	}
 	if _, err := tx.Exec(ctx, `
-			INSERT INTO files (id, name, size, chunk_size, created_at, owner_user_id, visibility,
-			                   access_token_hash, access_token_rotated_at, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		f.ID, f.Name, f.Size, f.ChunkSize, f.CreatedAt, f.OwnerUserID, vis,
+				INSERT INTO files (id, name, size, chunk_size, created_at, owner_user_id, visibility,
+				                   status, access_token_hash, access_token_rotated_at, expires_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		f.ID, f.Name, f.Size, f.ChunkSize, f.CreatedAt, f.OwnerUserID, vis, status,
 		tokenHash, rotated, f.ExpiresAt); err != nil {
 		return fmt.Errorf("insert file: %w", err)
 	}
@@ -160,7 +165,7 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 
 func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility,
+		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
 		       access_token_hash, access_token_rotated_at, expires_at
 		FROM files WHERE id = $1`, id)
 	f, err := scanFileMeta(row)
@@ -191,6 +196,35 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 	return f, err
 }
 
+// FindFileByNameAndParts returns an unexpired file owned by ownerUserID with the
+// same name and ordered Discord message_id list. ownerUserID must be set; other
+// users' files are never matched.
+func (s *Store) FindFileByNameAndParts(ctx context.Context, ownerUserID *string, name string, messageIDs []string, now time.Time) (File, error) {
+	if ownerUserID == nil || *ownerUserID == "" || len(messageIDs) == 0 {
+		return File{}, ErrNotFound
+	}
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		SELECT f.id
+		FROM files f
+		WHERE f.name = $1
+		  AND f.owner_user_id = $2::uuid
+		  AND f.expires_at > $3
+		  AND (
+		    SELECT array_agg(c.message_id ORDER BY c.idx)
+		    FROM chunks c WHERE c.file_id = f.id
+		  ) = $4::text[]
+		ORDER BY f.created_at DESC, f.id DESC
+		LIMIT 1`, name, *ownerUserID, now, messageIDs).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return File{}, ErrNotFound
+	}
+	if err != nil {
+		return File{}, err
+	}
+	return s.GetFile(ctx, uuidHex(id))
+}
+
 type scannable interface {
 	Scan(dest ...any) error
 }
@@ -201,7 +235,7 @@ func scanFileMeta(row scannable) (File, error) {
 	var tokenHash *string
 	var rotated *time.Time
 	err := row.Scan(&f.ID, &f.Name, &f.Size, &f.ChunkSize, &f.CreatedAt,
-		&owner, &f.Visibility, &tokenHash, &rotated, &f.ExpiresAt)
+		&owner, &f.Visibility, &f.Status, &tokenHash, &rotated, &f.ExpiresAt)
 	if err != nil {
 		return File{}, err
 	}
@@ -214,7 +248,22 @@ func scanFileMeta(row scannable) (File, error) {
 		f.AccessTokenHash = *tokenHash
 	}
 	f.AccessTokenRotatedAt = rotated
+	if f.Status == "" {
+		f.Status = FileStatusReady
+	}
 	return f, nil
+}
+
+// UpdateFileStatus sets files.status (e.g. ready → duplicate on re-upload).
+func (s *Store) UpdateFileStatus(ctx context.Context, id, status string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE files SET status = $2 WHERE id = $1`, id, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Chunk is one entry in the content-addressed chunk store.
@@ -287,7 +336,7 @@ func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chun
 // ListFilesByOwner returns files owned by ownerID, newest first.
 func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]File, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility,
+		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
 		       access_token_hash, access_token_rotated_at, expires_at
 		FROM files
 		WHERE owner_user_id = $1

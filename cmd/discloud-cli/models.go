@@ -19,6 +19,7 @@ type FileItem struct {
 	FileSize           int64     `json:"fileSize"`
 	ChunkSize          int64     `json:"chunkSize,omitempty"`
 	Visibility         string    `json:"visibility"`
+	Status             string    `json:"status,omitempty"`
 	OwnedByCurrentUser bool      `json:"ownedByCurrentUser,omitempty"`
 	CreatedAt          time.Time `json:"createdAt"`
 	ExpiresAt          time.Time `json:"expiresAt"`
@@ -86,6 +87,7 @@ type InspectResponse struct {
 	CreatedAt          time.Time  `json:"createdAt"`
 	ExpiresAt          time.Time  `json:"expiresAt"`
 	Visibility         string     `json:"visibility"`
+	Status             string     `json:"status,omitempty"`
 	OwnedByCurrentUser bool       `json:"ownedByCurrentUser"`
 	Views              int64      `json:"views"`
 	Downloads          int64      `json:"downloads"`

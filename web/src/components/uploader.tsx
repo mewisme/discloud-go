@@ -322,6 +322,13 @@ function ResultBody({
               {formatBytes(result.fileSize)}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Badge
+                variant={
+                  result.status === "duplicate" ? "outline" : "secondary"
+                }
+              >
+                {result.status ?? "ready"}
+              </Badge>
               {result.visibility && (
                 <Badge variant="secondary">{result.visibility}</Badge>
               )}
@@ -346,6 +353,11 @@ function ResultBody({
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant={result.status === "duplicate" ? "outline" : "secondary"}
+          >
+            {result.status ?? "ready"}
+          </Badge>
           {result.visibility && (
             <Badge variant="secondary">{result.visibility}</Badge>
           )}

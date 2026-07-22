@@ -63,11 +63,16 @@ func newUploadCmd() *cobra.Command {
 
 func printUploadSuccess(item FileItem) {
 	on := ui.ColorOn(os.Stdout)
-	ui.PrintSuccess("%s %s (%s) %s",
+	status := item.Status
+	if status == "" {
+		status = "ready"
+	}
+	ui.PrintSuccess("%s %s (%s) %s %s",
 		ui.IconUp,
 		ui.Bold(on, item.FileName),
 		ui.Dim(on, client.FormatBytes(item.FileSize)),
 		ui.Cyan(on, item.FileID),
+		ui.Dim(on, status),
 	)
 	if item.AccessToken != "" {
 		fmt.Printf("%s %s\n", ui.Yellow(on, ui.IconKey), ui.Cyan(on, item.AccessToken))

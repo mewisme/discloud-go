@@ -15,9 +15,9 @@ import (
 
 // File is the UI view of a file row (converted from main's FileItem).
 type File struct {
-	ID, Name, Visibility string
-	Size                 int64
-	Expires              time.Time
+	ID, Name, Visibility, Status string
+	Size                         int64
+	Expires                      time.Time
 }
 
 // Inspect holds the fields PrintInspect needs (same names as InspectResponse).
@@ -30,6 +30,7 @@ type Inspect struct {
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
 	Visibility      string
+	Status          string
 	Views           int64
 	Downloads       int64
 	Ranges          int64
@@ -145,23 +146,24 @@ func spanInner(widths []int) int {
 
 // PrintFileTable prints a file listing table.
 func PrintFileTable(w io.Writer, files []File) error {
-	headers := []string{"ID", "NAME", "SIZE", "VISIBILITY", "EXPIRES"}
+	headers := []string{"ID", "NAME", "SIZE", "STATUS", "VISIBILITY", "EXPIRES"}
 	rows := make([][]string, len(files))
 	for i, f := range files {
 		rows[i] = []string{
 			f.ID,
 			f.Name,
 			client.FormatBytes(f.Size),
+			ShortStatus(f.Status),
 			ShortVis(f.Visibility),
 			formatTimeShort(f.Expires),
 		}
 	}
-	return printTable(w, headers, rows, []bool{false, false, true, false, false}, 1, 0)
+	return printTable(w, headers, rows, []bool{false, false, true, false, false, false}, 1, 0)
 }
 
 // printPickFileTable is PrintFileTable with a 1-based # column for selection.
 func printPickFileTable(w io.Writer, files []File) error {
-	headers := []string{"#", "ID", "NAME", "SIZE", "VISIBILITY", "EXPIRES"}
+	headers := []string{"#", "ID", "NAME", "SIZE", "STATUS", "VISIBILITY", "EXPIRES"}
 	rows := make([][]string, len(files))
 	for i, f := range files {
 		rows[i] = []string{
@@ -169,11 +171,12 @@ func printPickFileTable(w io.Writer, files []File) error {
 			f.ID,
 			f.Name,
 			client.FormatBytes(f.Size),
+			ShortStatus(f.Status),
 			ShortVis(f.Visibility),
 			formatTimeShort(f.Expires),
 		}
 	}
-	return printTable(w, headers, rows, []bool{true, false, false, true, false, false}, 2, 1)
+	return printTable(w, headers, rows, []bool{true, false, false, true, false, false, false}, 2, 1)
 }
 
 // PrintInspect prints file analytics as KV blocks.
@@ -189,6 +192,7 @@ func PrintInspect(w io.Writer, item Inspect) error {
 			{"size", client.FormatBytes(item.FileSize)},
 			{"chunks", fmt.Sprintf("%d × %s", item.ChunkCount, client.FormatBytes(item.ChunkSize))},
 			{"visibility", ShortVis(item.Visibility)},
+			{"status", ShortStatus(item.Status)},
 			{"created", FormatTime(item.CreatedAt)},
 			{"expires", FormatTime(item.ExpiresAt)},
 		}},
@@ -398,6 +402,18 @@ func ShortVis(v string) string {
 	switch v {
 	case "private", "public":
 		return v
+	default:
+		return v
+	}
+}
+
+// ShortStatus returns a short file status for tables.
+func ShortStatus(v string) string {
+	switch v {
+	case "ready", "duplicate":
+		return v
+	case "":
+		return "ready"
 	default:
 		return v
 	}

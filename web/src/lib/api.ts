@@ -37,6 +37,9 @@ export type AccountMe = {
   };
 };
 
+/** Upload outcome badge on a file record. */
+export type FileStatus = "ready" | "duplicate";
+
 /** Shared file link payload from upload / file APIs. */
 export interface FileLinks {
   fileId: string;
@@ -47,6 +50,7 @@ export interface FileLinks {
   downloadURL: string;
   longDownloadURL: string;
   visibility?: Visibility;
+  status?: FileStatus;
   ownedByCurrentUser?: boolean;
   createdAt?: string;
   expiresAt?: string;
@@ -65,6 +69,7 @@ export interface FileMeta {
   createdAt: string;
   expiresAt?: string;
   visibility?: Visibility;
+  status?: FileStatus;
   ownedByCurrentUser?: boolean;
 }
 
@@ -74,6 +79,7 @@ export interface OwnedFile extends FileLinks {
   createdAt: string;
   expiresAt: string;
   visibility: Visibility;
+  status?: FileStatus;
 }
 
 export interface FileInspect {
@@ -85,6 +91,7 @@ export interface FileInspect {
   createdAt: string;
   expiresAt?: string;
   visibility?: Visibility;
+  status?: FileStatus;
   ownedByCurrentUser?: boolean;
   views: number;
   downloads: number;
