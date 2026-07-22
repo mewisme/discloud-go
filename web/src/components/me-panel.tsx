@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
@@ -12,9 +11,10 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -22,15 +22,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import {
   ApiError,
-  apiURL,
   changePassword,
   fetchAccountMe,
+  updatePreferences,
   type AccountMe,
 } from "@/lib/api";
 import {
@@ -42,7 +53,6 @@ import {
 } from "@/lib/auth";
 import { formatBytes, formatDate } from "@/lib/format";
 import { parseUserAgent } from "@/lib/user-agent";
-import { cn } from "@/lib/utils";
 
 function StatCard({
   label,
@@ -93,6 +103,7 @@ export function MePanel() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [savingVisibility, setSavingVisibility] = useState(false);
 
   useEffect(() => {
     void ensureAuth();
@@ -152,9 +163,10 @@ export function MePanel() {
 
   if (loadError || !account) {
     return (
-      <div className="mx-auto w-full max-w-3xl text-sm text-destructive">
-        {loadError ?? "Failed to load account"}
-      </div>
+      <Alert variant="destructive" className="mx-auto w-full max-w-3xl">
+        <AlertTitle>Could not load account</AlertTitle>
+        <AlertDescription>{loadError ?? "Failed to load account"}</AlertDescription>
+      </Alert>
     );
   }
 
@@ -165,7 +177,6 @@ export function MePanel() {
         (100 * account.stats.expiringSoonCount) / account.stats.fileCount,
       )
       : 0;
-  const apiOrigin = apiURL("").replace(/\/$/, "") || "http://localhost:8080";
 
   async function onChangePassword(e: React.FormEvent) {
     e.preventDefault();
@@ -223,7 +234,7 @@ export function MePanel() {
         </div>
       </div>
 
-      <section className="space-y-3">
+      <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">Overview</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Uploads" value={String(account.stats.fileCount)} />
@@ -243,14 +254,15 @@ export function MePanel() {
           />
         </div>
         {account.stats.fileCount > 0 ? (
-          <Progress value={expiringPct} className="gap-1.5">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex w-full items-center justify-between gap-3 text-xs text-muted-foreground">
               <span>Files expiring within 7 days</span>
-              <span className="tabular-nums">
+              <span className="shrink-0 tabular-nums">
                 {account.stats.expiringSoonCount}/{account.stats.fileCount}
               </span>
             </div>
-          </Progress>
+            <Progress value={expiringPct} />
+          </div>
         ) : null}
       </section>
 
@@ -261,7 +273,7 @@ export function MePanel() {
             How long files stay available before cleanup.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
+        <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
           <p>
             Signed-in uploads expire after{" "}
             <span className="font-medium text-foreground">
@@ -317,49 +329,55 @@ export function MePanel() {
                       Your current session stays signed in after a password
                       change.
                     </p>
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">
-                        Current password
-                      </span>
-                      <Input
-                        type="password"
-                        autoComplete="current-password"
-                        required
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        disabled={busy}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">
-                        New password
-                      </span>
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        required
-                        minLength={8}
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        disabled={busy}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">
-                        Confirm new password
-                      </span>
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        required
-                        minLength={8}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        disabled={busy}
-                      />
-                    </label>
+                    <FieldGroup className="gap-3">
+                      <Field>
+                        <FieldLabel htmlFor="current-password">
+                          Current password
+                        </FieldLabel>
+                        <Input
+                          id="current-password"
+                          type="password"
+                          autoComplete="current-password"
+                          required
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          disabled={busy}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="new-password">
+                          New password
+                        </FieldLabel>
+                        <Input
+                          id="new-password"
+                          type="password"
+                          autoComplete="new-password"
+                          required
+                          minLength={8}
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          disabled={busy}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="confirm-password">
+                          Confirm new password
+                        </FieldLabel>
+                        <Input
+                          id="confirm-password"
+                          type="password"
+                          autoComplete="new-password"
+                          required
+                          minLength={8}
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          disabled={busy}
+                        />
+                      </Field>
+                    </FieldGroup>
                     <Button type="submit" disabled={busy} className="self-start">
-                      {busy ? "Please wait…" : "Update password"}
+                      {busy ? <Spinner data-icon="inline-start" /> : null}
+                      {busy ? "Updating…" : "Update password"}
                     </Button>
                   </form>
                 ) : null}
@@ -396,56 +414,72 @@ export function MePanel() {
 
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>Upload preferences</CardTitle>
-            <Badge variant="outline">Coming soon</Badge>
-          </div>
+          <CardTitle>Upload preferences</CardTitle>
           <CardDescription>
-            Defaults for future uploads. Not applied yet.
+            Applied to new uploads from this account.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1.5 opacity-60">
-            <span className="text-xs font-medium text-muted-foreground">
+          <Field>
+            <FieldLabel htmlFor="default-visibility">
               Default visibility
-            </span>
-            <select
-              disabled
-              className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm"
-              defaultValue="public"
+            </FieldLabel>
+            <Select
+              value={account.preferences?.defaultVisibility ?? "public"}
+              disabled={savingVisibility}
+              onValueChange={(v) => {
+                if (v !== "public" && v !== "private") return;
+                const next = v;
+                const prev = account.preferences?.defaultVisibility ?? "public";
+                if (next === prev) return;
+                setSavingVisibility(true);
+                void updatePreferences({ defaultVisibility: next })
+                  .then((res) => {
+                    setAccount({
+                      ...account,
+                      preferences: res.preferences,
+                    });
+                    toast.success(
+                      next === "private"
+                        ? "New uploads will be private"
+                        : "New uploads will be public",
+                    );
+                  })
+                  .catch((err) => {
+                    toast.error(
+                      err instanceof ApiError
+                        ? err.message
+                        : "Could not save preference",
+                    );
+                  })
+                  .finally(() => setSavingVisibility(false));
+              }}
             >
-              <option value="public">Public</option>
-              <option value="private">Private</option>
-            </select>
-          </label>
-          <label className="flex items-center justify-between gap-3 opacity-60">
-            <span className="text-sm">Prefer chunked upload for large files</span>
-            <input type="checkbox" disabled defaultChecked className="size-4" />
-          </label>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Developers</CardTitle>
-          <CardDescription>API docs and endpoints for this instance.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2 text-sm">
-          <Link
-            href="/docs"
-            className={cn(buttonVariants({ variant: "secondary" }), "justify-start")}
-          >
-            API reference
-          </Link>
-          <Link
-            href="/docs#auth"
-            className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
-            Auth endpoints
-          </Link>
-          <p className="pt-1 font-mono text-xs text-muted-foreground break-all">
-            {apiOrigin}
-          </p>
+              <SelectTrigger
+                id="default-visibility"
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="public">Public</SelectItem>
+                  <SelectItem value="private">Private</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field orientation="horizontal" data-disabled className="opacity-60">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <FieldLabel htmlFor="prefer-chunked">
+                Prefer chunked upload for large files
+              </FieldLabel>
+              <Badge variant="outline" className="w-fit">
+                Coming soon
+              </Badge>
+            </div>
+            <Switch id="prefer-chunked" disabled defaultChecked />
+          </Field>
         </CardContent>
       </Card>
 

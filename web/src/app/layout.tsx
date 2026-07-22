@@ -3,12 +3,13 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Cloud } from "lucide-react";
-import { Toaster } from "sonner";
 
 import { HealthBanner } from "@/components/health-banner";
 import { AuthHeader } from "@/components/auth-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -59,17 +60,34 @@ export default async function RootLayout({
       </head>
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <HealthBanner />
-          <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur">
-            <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-3 px-4">
-              <Link
-                href="/"
-                className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
-              >
-                <Cloud className="size-5 text-primary" aria-hidden />
-                DisCloud
-              </Link>
-              <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
+          <TooltipProvider>
+            <HealthBanner />
+            <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur">
+              <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-3 px-4">
+                <Link
+                  href="/"
+                  className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
+                >
+                  <Cloud className="size-5 text-primary" aria-hidden />
+                  DisCloud
+                </Link>
+                <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
+                  <Link href="/" className="transition-colors hover:text-foreground">
+                    Upload
+                  </Link>
+                  <Link href="/files" className="transition-colors hover:text-foreground">
+                    Files
+                  </Link>
+                  <Link href="/docs" className="transition-colors hover:text-foreground">
+                    API
+                  </Link>
+                </nav>
+                <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+                  <AuthHeader />
+                  <ThemeToggle />
+                </div>
+              </div>
+              <nav className="flex items-center gap-4 border-t border-border/60 px-4 py-2 text-sm text-muted-foreground sm:hidden">
                 <Link href="/" className="transition-colors hover:text-foreground">
                   Upload
                 </Link>
@@ -80,30 +98,15 @@ export default async function RootLayout({
                   API
                 </Link>
               </nav>
-              <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-                <AuthHeader />
-                <ThemeToggle />
-              </div>
-            </div>
-            <nav className="flex items-center gap-4 border-t border-border/60 px-4 py-2 text-sm text-muted-foreground sm:hidden">
-              <Link href="/" className="transition-colors hover:text-foreground">
-                Upload
-              </Link>
-              <Link href="/files" className="transition-colors hover:text-foreground">
-                Files
-              </Link>
-              <Link href="/docs" className="transition-colors hover:text-foreground">
-                API
-              </Link>
-            </nav>
-          </header>
-          <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10">
-            {children}
-          </main>
-          <footer className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
-            DisCloud — upload, share, and download files.
-          </footer>
-          <Toaster richColors position="bottom-right" />
+            </header>
+            <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10">
+              {children}
+            </main>
+            <footer className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
+              DisCloud — upload, share, and download files.
+            </footer>
+            <Toaster richColors position="bottom-right" />
+          </TooltipProvider>
         </ThemeProvider>
       </body>
     </html>

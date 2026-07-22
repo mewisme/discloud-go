@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/mewisme/discloud-go/internal/auth"
 	"github.com/mewisme/discloud-go/internal/store"
 )
 
@@ -91,16 +92,20 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f := s.newOwnedFile(r, fileID, fileName, fileSize, parts)
+	f, rawToken, err := s.newOwnedFile(r, fileID, fileName, fileSize, parts)
+	if err != nil {
+		s.log.Error("prepare file failed", "file", fileName, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to prepare file metadata")
+		return
+	}
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		s.log.Error("persist file failed", "file", fileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist file metadata")
 		return
 	}
 
-	base := s.baseURL(r)
 	s.log.Info("file uploaded", "file", fileName, "size", humanBytes(fileSize), "chunks", len(parts))
-	writeJSON(w, http.StatusOK, s.fileLinksResponse(r, base, f, ""))
+	s.writeFileCreated(w, r, f, rawToken)
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -373,8 +378,9 @@ func (s *Server) baseURL(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-// newOwnedFile builds a File with ownership and retention from the optional session.
-func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, parts []store.FilePart) store.File {
+// newOwnedFile builds a File with ownership, retention, and default visibility
+// from the optional session. rawToken is non-empty when the file is private.
+func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, parts []store.FilePart) (store.File, string, error) {
 	now := s.now().UTC()
 	f := store.File{
 		ID:         id,
@@ -390,8 +396,29 @@ func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, part
 		uid := u.ID
 		f.OwnerUserID = &uid
 		f.ExpiresAt = now.Add(authenticatedRetention)
+		if u.DefaultVisibility == store.VisibilityPrivate {
+			raw, err := auth.GenerateFileToken()
+			if err != nil {
+				return store.File{}, "", err
+			}
+			hash := s.keys.HashFileToken(raw)
+			rotated := now
+			f.Visibility = store.VisibilityPrivate
+			f.AccessTokenHash = hash
+			f.AccessTokenRotatedAt = &rotated
+			return f, raw, nil
+		}
 	}
-	return f
+	return f, "", nil
+}
+
+func (s *Server) writeFileCreated(w http.ResponseWriter, r *http.Request, f store.File, rawToken string) {
+	base := s.baseURL(r)
+	out := s.fileLinksResponse(r, base, f, rawToken)
+	if rawToken != "" {
+		out["accessToken"] = rawToken
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) ownedByCurrentUser(r *http.Request, f store.File) bool {

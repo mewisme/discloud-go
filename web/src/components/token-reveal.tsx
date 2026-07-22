@@ -1,11 +1,23 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 
-import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { buildFileURL, buildInspectPath } from "@/lib/api";
 
 export type TokenReveal = {
@@ -27,16 +39,23 @@ export function TokenRevealPanel({
   return (
     <Card className="w-full border-geist-amber/40 bg-geist-amber-soft">
       <CardContent className="relative flex flex-col gap-4 pr-10">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="absolute top-0 right-0"
-          aria-label="Dismiss token reveal"
-          onClick={onDismiss}
-        >
-          <X aria-hidden />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute top-0 right-0"
+                aria-label="Dismiss token reveal"
+                onClick={onDismiss}
+              />
+            }
+          >
+            <X aria-hidden />
+          </TooltipTrigger>
+          <TooltipContent>Dismiss</TooltipContent>
+        </Tooltip>
         <div>
           <p className="font-medium">
             Private access token{reveals.length > 1 ? "s" : ""}
@@ -47,7 +66,11 @@ export function TokenRevealPanel({
           </p>
         </div>
         {reveals.map((reveal) => (
-          <RevealFields key={reveal.fileId} reveal={reveal} showName={reveals.length > 1} />
+          <RevealFields
+            key={reveal.fileId}
+            reveal={reveal}
+            showName={reveals.length > 1}
+          />
         ))}
       </CardContent>
     </Card>
@@ -75,29 +98,63 @@ function RevealFields({
       : buildInspectPath(fileId, accessToken);
 
   return (
-    <div className="flex flex-col gap-3 border-t border-border/60 pt-3 first:border-t-0 first:pt-0">
+    <FieldGroup className="gap-3 border-t border-border/60 pt-3 first:border-t-0 first:pt-0">
       {showName && <p className="truncate text-sm font-medium">{fileName}</p>}
-      <Field label="Token" value={accessToken} />
-      <Field label="Private view URL" value={viewURL} />
-      <Field label="Private download URL" value={downloadURL} />
-      <Field label="Private inspect URL" value={inspectURL} />
-    </div>
+      <CopyField label="Token" value={accessToken} />
+      <CopyField label="Private view URL" value={viewURL} />
+      <CopyField label="Private download URL" value={downloadURL} />
+      <CopyField label="Private inspect URL" value={inspectURL} />
+    </FieldGroup>
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const id = `copy-${label.replace(/\s+/g, "-").toLowerCase()}`;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      toast.success("Link copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }
+
   return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 items-center gap-2">
-        <Input
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <InputGroup>
+        <InputGroupInput
+          id={id}
           readOnly
           value={value}
           className="min-w-0 font-mono text-xs"
           aria-label={label}
         />
-        <CopyButton value={value} label={`Copy ${label.toLowerCase()}`} />
-      </div>
-    </div>
+        <InputGroupAddon align="inline-end">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <InputGroupButton
+                  size="icon-xs"
+                  aria-label={`Copy ${label.toLowerCase()}`}
+                  onClick={copy}
+                />
+              }
+            >
+              {copied ? (
+                <Check className="text-geist-green" aria-hidden />
+              ) : (
+                <Copy aria-hidden />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>Copy</TooltipContent>
+          </Tooltip>
+        </InputGroupAddon>
+      </InputGroup>
+    </Field>
   );
 }

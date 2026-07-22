@@ -36,6 +36,7 @@ type Store interface {
 	TouchSession(ctx context.Context, tokenHash, ip, userAgent string, now time.Time) error
 	DeleteSession(ctx context.Context, tokenHash string) error
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
+	UpdateDefaultVisibility(ctx context.Context, userID, visibility string) error
 	OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (store.OwnerStats, error)
 	UpdateVisibility(ctx context.Context, id, visibility string, tokenHash *string, rotatedAt *time.Time) error
 	RotateAccessToken(ctx context.Context, id, tokenHash string, rotatedAt time.Time) error
@@ -106,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/signin", s.handleSignin)
 	mux.HandleFunc("POST /api/auth/signout", s.handleSignout)
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
+	mux.HandleFunc("PATCH /api/auth/preferences", s.handleUpdatePreferences)
 	mux.HandleFunc("POST /api/auth/password", s.handleChangePassword)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/chunks/{hash}", s.handleChunkCheck)

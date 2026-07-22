@@ -13,7 +13,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { ApiError, signIn, signUp } from "@/lib/api";
 import { setAuthUser } from "@/lib/auth";
 
@@ -65,38 +67,45 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={onSubmit}>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              Username
-            </span>
-            <Input
-              type="text"
-              autoComplete="username"
-              required
-              minLength={3}
-              maxLength={32}
-              pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              Password
-            </span>
-            <Input
-              type="password"
-              autoComplete={isSignUp ? "new-password" : "current-password"}
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-            />
-          </label>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="auth-username">Username</FieldLabel>
+              <Input
+                id="auth-username"
+                type="text"
+                autoComplete="username"
+                required
+                minLength={3}
+                maxLength={32}
+                pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={busy}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="auth-password">Password</FieldLabel>
+              <Input
+                id="auth-password"
+                type="password"
+                autoComplete={isSignUp ? "new-password" : "current-password"}
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={busy}
+              />
+            </Field>
+          </FieldGroup>
           <Button type="submit" disabled={busy}>
-            {busy ? "Please wait…" : isSignUp ? "Sign up" : "Sign in"}
+            {busy ? <Spinner data-icon="inline-start" /> : null}
+            {busy
+              ? isSignUp
+                ? "Creating…"
+                : "Signing in…"
+              : isSignUp
+                ? "Sign up"
+                : "Sign in"}
           </Button>
           <p className="text-center text-sm text-muted-foreground">
             {isSignUp ? (

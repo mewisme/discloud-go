@@ -31,6 +31,7 @@ type User struct {
 	Username          string    `json:"username"`
 	PasswordHash      string    `json:"-"`
 	Role              string    `json:"role"`
+	DefaultVisibility string    `json:"defaultVisibility"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 	PasswordChangedAt time.Time `json:"passwordChangedAt"`
@@ -96,16 +97,18 @@ func (s *Store) CreateUser(ctx context.Context, id, username, passwordHash strin
 	}
 	return User{
 		ID: id, Username: username, PasswordHash: passwordHash, Role: role,
-		CreatedAt: now, UpdatedAt: now, PasswordChangedAt: now,
+		DefaultVisibility: VisibilityPublic,
+		CreatedAt:         now, UpdatedAt: now, PasswordChangedAt: now,
 	}, nil
 }
 
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, username, password_hash, role, created_at, updated_at, password_changed_at
+		`SELECT id, username, password_hash, role, default_visibility, created_at, updated_at, password_changed_at
 		 FROM users WHERE username = $1`, username).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DefaultVisibility,
+			&u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -115,9 +118,10 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, e
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, username, password_hash, role, created_at, updated_at, password_changed_at
+		`SELECT id, username, password_hash, role, default_visibility, created_at, updated_at, password_changed_at
 		 FROM users WHERE id = $1`, id).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DefaultVisibility,
+			&u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -141,11 +145,12 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash string, now time.Time) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.username, u.password_hash, u.role, u.created_at, u.updated_at, u.password_changed_at
+		SELECT u.id, u.username, u.password_hash, u.role, u.default_visibility, u.created_at, u.updated_at, u.password_changed_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > $2`, tokenHash, now).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DefaultVisibility,
+			&u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -193,6 +198,21 @@ func (s *Store) UpdatePasswordHash(ctx context.Context, userID, passwordHash str
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE users SET password_hash = $2, updated_at = $3, password_changed_at = $3 WHERE id = $1`,
 		userID, passwordHash, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateDefaultVisibility sets the user's preferred visibility for new uploads.
+func (s *Store) UpdateDefaultVisibility(ctx context.Context, userID, visibility string) error {
+	now := time.Now().UTC()
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET default_visibility = $2, updated_at = $3 WHERE id = $1`,
+		userID, visibility, now)
 	if err != nil {
 		return err
 	}

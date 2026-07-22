@@ -17,6 +17,7 @@ import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
 import { ShareQR } from "@/components/share-qr";
+import { TokenRevealPanel } from "@/components/token-reveal";
 import {
   Accordion,
   AccordionContent,
@@ -306,6 +307,8 @@ function ResultBody({
   onDismiss: () => void;
   compact?: boolean;
 }) {
+  const [showToken, setShowToken] = useState(Boolean(result.accessToken));
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {!compact ? (
@@ -365,6 +368,19 @@ function ResultBody({
         </div>
       )}
 
+      {showToken && result.accessToken ? (
+        <TokenRevealPanel
+          reveals={[
+            {
+              fileId: result.fileId,
+              fileName: result.fileName,
+              accessToken: result.accessToken,
+            },
+          ]}
+          onDismiss={() => setShowToken(false)}
+        />
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
@@ -406,7 +422,7 @@ function ResultBody({
           <Download aria-hidden /> Download
         </a>
         <Link
-          href={buildInspectPath(result.fileId)}
+          href={buildInspectPath(result.fileId, result.accessToken)}
           className={buttonVariants({ variant: "secondary", size: "sm" })}
         >
           <Search aria-hidden /> Inspect

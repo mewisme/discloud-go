@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { FileInspectPanel } from "@/components/file-inspect";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -30,5 +31,15 @@ export async function generateMetadata({
 export default async function InspectPage({ params, searchParams }: Props) {
   const { id } = await params;
   const token = firstParam((await searchParams).token);
-  return <FileInspectPanel fileId={id} accessToken={token} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <PageBreadcrumb
+        items={[
+          { label: "Files", href: "/files" },
+          { label: `Inspect ${id.slice(0, 8)}…` },
+        ]}
+      />
+      <FileInspectPanel fileId={id} accessToken={token} />
+    </div>
+  );
 }

@@ -5,6 +5,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -21,8 +26,24 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
   }
 
   return (
-    <Button variant="outline" size="icon-sm" aria-label={label} onClick={copy}>
-      {copied ? <Check className="text-geist-green" aria-hidden /> : <Copy aria-hidden />}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={label}
+            onClick={copy}
+          />
+        }
+      >
+        {copied ? (
+          <Check className="text-geist-green" aria-hidden />
+        ) : (
+          <Copy aria-hidden />
+        )}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

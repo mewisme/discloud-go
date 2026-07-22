@@ -135,14 +135,18 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		parts[i] = store.FilePart{MessageID: c.MessageID, BotID: c.BotID}
 	}
 
-	f := s.newOwnedFile(r, newID(), formatFileName(req.FileName), fileSize, parts)
+	f, rawToken, err := s.newOwnedFile(r, newID(), formatFileName(req.FileName), fileSize, parts)
+	if err != nil {
+		s.log.Error("prepare file failed", "file", req.FileName, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to prepare file metadata")
+		return
+	}
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		s.log.Error("persist file failed", "file", f.Name, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist file metadata")
 		return
 	}
 
-	base := s.baseURL(r)
 	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(fileSize), "chunks", len(parts))
-	writeJSON(w, http.StatusOK, s.fileLinksResponse(r, base, f, ""))
+	s.writeFileCreated(w, r, f, rawToken)
 }

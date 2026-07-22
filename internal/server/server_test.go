@@ -281,7 +281,8 @@ func (m *memStore) CreateUser(_ context.Context, id, username, passwordHash stri
 	now := time.Now().UTC()
 	u := store.User{
 		ID: id, Username: username, PasswordHash: passwordHash, Role: role,
-		CreatedAt: now, UpdatedAt: now, PasswordChangedAt: now,
+		DefaultVisibility: store.VisibilityPublic,
+		CreatedAt:         now, UpdatedAt: now, PasswordChangedAt: now,
 	}
 	m.users[id] = u
 	m.byUser[username] = id
@@ -377,6 +378,19 @@ func (m *memStore) UpdatePasswordHash(_ context.Context, userID, passwordHash st
 	u.PasswordHash = passwordHash
 	u.UpdatedAt = now
 	u.PasswordChangedAt = now
+	m.users[userID] = u
+	return nil
+}
+
+func (m *memStore) UpdateDefaultVisibility(_ context.Context, userID, visibility string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	u.DefaultVisibility = visibility
+	u.UpdatedAt = time.Now().UTC()
 	m.users[userID] = u
 	return nil
 }

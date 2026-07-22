@@ -14,7 +14,7 @@ function Progress({
     <ProgressPrimitive.Root
       value={value}
       data-slot="progress"
-      className={cn("flex w-full min-w-0 flex-col gap-2", className)}
+      className={cn("flex flex-wrap gap-3", className)}
       {...props}
     >
       {children}
@@ -65,7 +65,7 @@ function ProgressValue({ className, ...props }: ProgressPrimitive.Value.Props) {
   return (
     <ProgressPrimitive.Value
       className={cn(
-        "shrink-0 text-sm text-muted-foreground tabular-nums",
+        "ml-auto text-sm text-muted-foreground tabular-nums",
         className
       )}
       data-slot="progress-value"

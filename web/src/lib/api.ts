@@ -32,6 +32,9 @@ export type AccountMe = {
     downloadExtensionDays: number;
     maxRetentionDays: number;
   };
+  preferences: {
+    defaultVisibility: Visibility;
+  };
 };
 
 /** Shared file link payload from upload / file APIs. */
@@ -47,6 +50,8 @@ export interface FileLinks {
   ownedByCurrentUser?: boolean;
   createdAt?: string;
   expiresAt?: string;
+  /** Present once when upload creates a private file. */
+  accessToken?: string;
 }
 
 export type UploadResult = FileLinks;
@@ -156,12 +161,18 @@ export function buildInspectPath(fileId: string, token?: string): string {
 export function withPublicURLs(result: UploadResult): UploadResult {
   const id = result.fileId;
   const name = result.fileName;
+  const token = result.accessToken;
   return {
     ...result,
-    url: buildFileURL({ fileId: id }),
-    longURL: buildFileURL({ fileId: id, fileName: name }),
-    downloadURL: buildFileURL({ fileId: id, download: true }),
-    longDownloadURL: buildFileURL({ fileId: id, fileName: name, download: true }),
+    url: buildFileURL({ fileId: id, token }),
+    longURL: buildFileURL({ fileId: id, fileName: name, token }),
+    downloadURL: buildFileURL({ fileId: id, download: true, token }),
+    longDownloadURL: buildFileURL({
+      fileId: id,
+      fileName: name,
+      download: true,
+      token,
+    }),
   };
 }
 
@@ -241,6 +252,15 @@ export async function changePassword(
   await apiFetch<void>("/api/auth/password", {
     method: "POST",
     json: { currentPassword, newPassword },
+  });
+}
+
+export async function updatePreferences(prefs: {
+  defaultVisibility: Visibility;
+}): Promise<{ preferences: { defaultVisibility: Visibility } }> {
+  return apiFetch("/api/auth/preferences", {
+    method: "PATCH",
+    json: prefs,
   });
 }
 

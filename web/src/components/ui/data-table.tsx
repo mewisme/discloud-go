@@ -14,6 +14,15 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Field, FieldLabel } from "@/components/ui/field"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -167,23 +176,34 @@ export function DataTable<TData, TValue>({
         </Table>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="whitespace-nowrap">Rows per page</span>
-          <select
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            value={pagination.pageSize}
-            aria-label="Rows per page"
-            onChange={(e) => {
-              table.setPageSize(Number(e.target.value))
+        <Field orientation="horizontal" className="w-auto items-center gap-2">
+          <FieldLabel htmlFor="rows-per-page" className="text-muted-foreground">
+            Rows per page
+          </FieldLabel>
+          <Select
+            value={String(pagination.pageSize)}
+            onValueChange={(value) => {
+              if (value != null) table.setPageSize(Number(value))
             }}
           >
-            {pageSizeOptions.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger
+              id="rows-per-page"
+              aria-label="Rows per page"
+              size="sm"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {pageSizeOptions.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground tabular-nums">
             Page {pageCount === 0 ? 0 : pagination.pageIndex + 1} of {pageCount}

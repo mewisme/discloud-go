@@ -130,6 +130,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	defVis := u.DefaultVisibility
+	if defVis == "" {
+		defVis = store.VisibilityPublic
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":                u.ID,
 		"username":          u.Username,
@@ -155,6 +159,38 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			"anonymousDays":         int(anonymousRetention / (24 * time.Hour)),
 			"downloadExtensionDays": int(downloadExtension / (24 * time.Hour)),
 			"maxRetentionDays":      int(maxRetentionFromNow / (24 * time.Hour)),
+		},
+		"preferences": map[string]any{
+			"defaultVisibility": defVis,
+		},
+	})
+}
+
+func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		DefaultVisibility string `json:"defaultVisibility"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	vis := body.DefaultVisibility
+	if vis != store.VisibilityPublic && vis != store.VisibilityPrivate {
+		writeJSONError(w, http.StatusBadRequest, "defaultVisibility must be public or private")
+		return
+	}
+	if err := s.store.UpdateDefaultVisibility(r.Context(), u.ID, vis); err != nil {
+		s.log.Error("update preferences failed", "user", u.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"preferences": map[string]any{
+			"defaultVisibility": vis,
 		},
 	})
 }

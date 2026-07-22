@@ -420,6 +420,58 @@ func TestUploadRetentionOwnership(t *testing.T) {
 	}
 }
 
+func TestDefaultVisibilityPreference(t *testing.T) {
+	e := newAuthEnv(t)
+	cookie, _ := e.signup(t, "prefs", "password1")
+
+	me := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
+	if me.StatusCode != http.StatusOK {
+		t.Fatalf("me = %d", me.StatusCode)
+	}
+	meBody := decodeJSON[map[string]any](t, me)
+	prefs := meBody["preferences"].(map[string]any)
+	if prefs["defaultVisibility"] != store.VisibilityPublic {
+		t.Fatalf("default visibility = %v", prefs["defaultVisibility"])
+	}
+
+	patch := e.doJSON(t, http.MethodPatch, "/api/auth/preferences", cookie, map[string]string{
+		"defaultVisibility": store.VisibilityPrivate,
+	})
+	if patch.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(patch.Body)
+		patch.Body.Close()
+		t.Fatalf("preferences = %d: %s", patch.StatusCode, body)
+	}
+	patchBody := decodeJSON[map[string]any](t, patch)
+	if patchBody["preferences"].(map[string]any)["defaultVisibility"] != store.VisibilityPrivate {
+		t.Fatalf("patch body = %+v", patchBody)
+	}
+
+	up := e.upload(t, cookie, "secret.txt", "private by default")
+	if up["visibility"] != store.VisibilityPrivate {
+		t.Fatalf("upload visibility = %v", up["visibility"])
+	}
+	raw, _ := up["accessToken"].(string)
+	if raw == "" {
+		t.Fatal("expected accessToken on private default upload")
+	}
+	fileID := up["fileId"].(string)
+
+	// Stranger without token → 404
+	denied := e.do(t, http.MethodGet, "/api/files/"+fileID, "", "", "")
+	if denied.StatusCode != http.StatusNotFound {
+		t.Fatalf("stranger status = %d", denied.StatusCode)
+	}
+	denied.Body.Close()
+
+	// Token works
+	ok := e.do(t, http.MethodGet, "/api/files/"+fileID+"?token="+raw, "", "", "")
+	if ok.StatusCode != http.StatusOK {
+		t.Fatalf("token access = %d", ok.StatusCode)
+	}
+	ok.Body.Close()
+}
+
 func TestPublicPrivateAccessMatrix(t *testing.T) {
 	e := newAuthEnv(t)
 	ownerCookie, _ := e.signup(t, "owner", "password1")

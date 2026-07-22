@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { DocsCode, DocsOrigin } from "@/components/docs-code";
+import { PageBreadcrumb } from "@/components/page-breadcrumb";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const metadata: Metadata = {
   title: "API",
@@ -17,14 +19,14 @@ const methodVariant: Record<string, string> = {
   DELETE: "bg-geist-red-soft text-geist-red",
 };
 
-const toc = [
+const tabs = [
   { id: "base", label: "Base URL" },
   { id: "cli", label: "CLI" },
   { id: "auth", label: "Auth" },
   { id: "upload", label: "Upload" },
-  { id: "chunked", label: "Chunked upload" },
+  { id: "chunked", label: "Chunked" },
   { id: "download", label: "Download" },
-  { id: "files", label: "Files & inspect" },
+  { id: "files", label: "Files" },
   { id: "ops", label: "Ops" },
   { id: "notes", label: "Notes" },
 ] as const;
@@ -68,7 +70,7 @@ function Endpoint({
   );
 }
 
-function Label({ children }: { children: ReactNode }) {
+function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
       {children}
@@ -76,77 +78,88 @@ function Label({ children }: { children: ReactNode }) {
   );
 }
 
+function SectionIntro({
+  title,
+  children,
+}: {
+  title: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      {children ? (
+        <p className="text-sm text-muted-foreground">{children}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function DocsPage() {
   return (
-    <div className="flex flex-col gap-10 lg:flex-row lg:gap-12">
-      <nav
-        aria-label="On this page"
-        className="lg:sticky lg:top-20 lg:h-fit lg:w-44 lg:shrink-0"
-      >
-        <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          On this page
+    <div className="flex flex-col gap-6">
+      <PageBreadcrumb items={[{ label: "API" }]} />
+
+      <header className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">API reference</h1>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Plain HTTP. Optional username/password sessions (
+          <code className="font-mono text-foreground">discloud_session</code>
+          ). Browser clients must send credentials and match{" "}
+          <code className="font-mono text-foreground">WEB_ORIGIN</code>.
         </p>
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm lg:flex-col lg:gap-1.5">
-          {toc.map((item) => (
-            <li key={item.id}>
-              <a
-                href={`#${item.id}`}
-                className="text-muted-foreground transition-colors hover:text-foreground"
+      </header>
+
+      <Tabs defaultValue="base" className="gap-6">
+        <div className="-mx-1 overflow-x-auto overflow-y-hidden px-1 pb-1">
+          <TabsList
+            variant="line"
+            className="h-auto w-max min-w-full justify-start gap-0"
+          >
+            {tabs.map((tab) => (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className="flex-none px-3"
               >
-                {item.label}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
-      <div className="min-w-0 flex-1 space-y-10">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">API reference</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Plain HTTP. Optional username/password sessions (
-            <code className="font-mono text-foreground">discloud_session</code>
-            ). Browser clients must send credentials and match{" "}
-            <code className="font-mono text-foreground">WEB_ORIGIN</code>.
-          </p>
-        </header>
-
-        <section id="base" className="scroll-mt-24 space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">Base URL</h2>
-          <p className="text-sm text-muted-foreground">
+        <TabsContent value="base" className="flex flex-col gap-3">
+          <SectionIntro title="Base URL">
             API origin (from <code className="font-mono text-foreground">API_URL</code>
             ): <DocsOrigin />
-          </p>
+          </SectionIntro>
           <DocsCode>{`export BASE=$BASE`}</DocsCode>
-        </section>
+        </TabsContent>
 
-        <section id="cli" className="scroll-mt-24 space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">CLI</h2>
-            <p className="text-sm text-muted-foreground">
-              Install <code className="font-mono text-foreground">discloud-cli</code>{" "}
-              (alias <code className="font-mono text-foreground">discloud</code>
-              ). Scripts are generated by this API with{" "}
-              <code className="font-mono text-foreground">DISCLOUD_BASE</code> /{" "}
-              <code className="font-mono text-foreground">DISCLOUD_ORIGIN</code>{" "}
-              baked from <code className="font-mono text-foreground">API_URL</code>{" "}
-              and <code className="font-mono text-foreground">WEB_ORIGIN</code>;
-              install writes them to the CLI config file (env still overrides).
-            </p>
-          </div>
-          <Label>Install · macOS / Linux</Label>
+        <TabsContent value="cli" className="flex flex-col gap-4">
+          <SectionIntro title="CLI">
+            Install <code className="font-mono text-foreground">discloud-cli</code>{" "}
+            (alias <code className="font-mono text-foreground">discloud</code>
+            ). Scripts are generated by this API with{" "}
+            <code className="font-mono text-foreground">DISCLOUD_BASE</code> /{" "}
+            <code className="font-mono text-foreground">DISCLOUD_ORIGIN</code>{" "}
+            baked from <code className="font-mono text-foreground">API_URL</code>{" "}
+            and <code className="font-mono text-foreground">WEB_ORIGIN</code>;
+            install writes them to the CLI config file (env still overrides).
+          </SectionIntro>
+          <SectionLabel>Install · macOS / Linux</SectionLabel>
           <DocsCode>{`curl -fsSL $WEB/install.sh | sh
 # pin: DISCLOUD_VERSION=v0.1.0 curl -fsSL $WEB/install.sh | sh
 # (or API directly: curl -fsSL $BASE/install.sh | sh)`}</DocsCode>
-          <Label>Install · Windows (PowerShell)</Label>
+          <SectionLabel>Install · Windows (PowerShell)</SectionLabel>
           <DocsCode>{`irm $WEB/install.ps1 | iex`}</DocsCode>
-          <Label>Scoop / Homebrew</Label>
+          <SectionLabel>Scoop / Homebrew</SectionLabel>
           <DocsCode>{`scoop bucket add mew https://github.com/mewisme/scoop-mew
 scoop install mew/discloud-cli
 
 brew tap mewisme/mew
 brew install --cask discloud-cli`}</DocsCode>
-          <Label>Examples</Label>
+          <SectionLabel>Examples</SectionLabel>
           <DocsCode>{`discloud auth signin you secret123
 discloud upload ./video.mp4          # resumable, 8 MB chunks
 discloud files list
@@ -165,18 +178,15 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
             <code className="font-mono text-foreground">/discloud</code> and is
             separate.
           </p>
-        </section>
+        </TabsContent>
 
-        <section id="auth" className="scroll-mt-24 space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">Auth</h2>
-            <p className="text-sm text-muted-foreground">
-              Cookie session. Username is immutable after signup (3–32 chars,{" "}
-              <code>[a-z0-9][a-z0-9_-]*</code>). First signup on a fresh DB
-              becomes <code>admin</code>; later accounts are <code>user</code>.
-              Password min 8 chars.
-            </p>
-          </div>
+        <TabsContent value="auth" className="flex flex-col gap-4">
+          <SectionIntro title="Auth">
+            Cookie session. Username is immutable after signup (3–32 chars,{" "}
+            <code>[a-z0-9][a-z0-9_-]*</code>). First signup on a fresh DB
+            becomes <code>admin</code>; later accounts are <code>user</code>.
+            Password min 8 chars.
+          </SectionIntro>
 
           <Endpoint method="POST" path="/api/auth/signup">
             <DocsCode>{`curl -X POST -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
@@ -223,27 +233,24 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
   -b cookies.txt -d '{"currentPassword":"secret123","newPassword":"secret456"}' \\
   "$BASE/api/auth/password"`}</DocsCode>
           </Endpoint>
-        </section>
+        </TabsContent>
 
-        <section id="upload" className="scroll-mt-24 space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">Upload</h2>
-            <p className="text-sm text-muted-foreground">
-              One request for small/medium files. Body = raw bytes. Server splits
-              into 8&nbsp;MB chunks. Public by default. With a session cookie,
-              the file is owned (30-day retention); anonymous = 7 days.
-            </p>
-          </div>
+        <TabsContent value="upload" className="flex flex-col gap-4">
+          <SectionIntro title="Upload">
+            One request for small/medium files. Body = raw bytes. Server splits
+            into 8&nbsp;MB chunks. Public by default. With a session cookie,
+            the file is owned (30-day retention); anonymous = 7 days.
+          </SectionIntro>
 
           <Endpoint method="POST" path="/api/upload?fileName={name}">
             <p>
               Simplest path when proxies allow the whole body (e.g. Cloudflare
               caps at ~100&nbsp;MB — use chunked upload for larger files).
             </p>
-            <Label>Example</Label>
+            <SectionLabel>Example</SectionLabel>
             <DocsCode>{`curl -X POST --data-binary @video.mp4 \\
   "$BASE/api/upload?fileName=video.mp4"`}</DocsCode>
-            <Label>Response · 200</Label>
+            <SectionLabel>Response · 200</SectionLabel>
             <DocsCode>{`{
   "fileId": "894d9eec70b09280134933c50b168592",
   "fileName": "video.mp4",
@@ -263,20 +270,15 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
               the body is empty.
             </p>
           </Endpoint>
-        </section>
+        </TabsContent>
 
-        <section id="chunked" className="scroll-mt-24 space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">
-              Chunked upload
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Any size, resumable. Split into <strong>8&nbsp;MB</strong> pieces
-              (last chunk may be shorter). Each chunk is keyed by SHA-256 — skip
-              uploads the server already has. Send credentials on complete so
-              ownership attaches when signed in.
-            </p>
-          </div>
+        <TabsContent value="chunked" className="flex flex-col gap-4">
+          <SectionIntro title="Chunked upload">
+            Any size, resumable. Split into <strong>8&nbsp;MB</strong> pieces
+            (last chunk may be shorter). Each chunk is keyed by SHA-256 — skip
+            uploads the server already has. Send credentials on complete so
+            ownership attaches when signed in.
+          </SectionIntro>
 
           <Endpoint method="GET/HEAD" path="/api/chunks/{sha256}">
             <p>
@@ -306,7 +308,7 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
     "fileName": "video.mp4",
     "chunkHashes": ["<hash1>", "<hash2>"]
   }'`}</DocsCode>
-            <Label>Bash · split + upload + complete</Label>
+            <SectionLabel>Bash · split + upload + complete</SectionLabel>
             <DocsCode>{`split -b 8m video.mp4 part-
 hashes=()
 for p in part-*; do
@@ -318,20 +320,17 @@ printf '%s\\n' "\${hashes[@]}" | jq -R . | jq -s \\
   curl -s -X POST -H "Content-Type: application/json" \\
     -d @- "$BASE/api/upload/complete"`}</DocsCode>
           </Endpoint>
-        </section>
+        </TabsContent>
 
-        <section id="download" className="scroll-mt-24 space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">Download</h2>
-            <p className="text-sm text-muted-foreground">
-              Stream bytes, force download, or fetch metadata. Single-chunk
-              responses may redirect to the CDN. Private files need a session
-              (owner/admin) or <code>?token=</code> / <code>X-File-Token</code>.
-            </p>
-          </div>
+        <TabsContent value="download" className="flex flex-col gap-4">
+          <SectionIntro title="Download">
+            Stream bytes, force download, or fetch metadata. Single-chunk
+            responses may redirect to the CDN. Private files need a session
+            (owner/admin) or <code>?token=</code> / <code>X-File-Token</code>.
+          </SectionIntro>
 
           <Endpoint method="GET" path="/f/{fileId}[/{fileName}]">
-            <ul className="list-disc space-y-1 pl-4">
+            <ul className="flex list-disc flex-col gap-1 pl-4">
               <li>
                 Optional <code>{"/{fileName}"}</code> is cosmetic (nice share
                 URLs).
@@ -359,14 +358,10 @@ curl -s "$BASE/f/<id>?token=<accessToken>&json=1"`}</DocsCode>
               private · 416 bad range.
             </p>
           </Endpoint>
-        </section>
+        </TabsContent>
 
-        <section id="files" className="scroll-mt-24 space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">
-              Files & inspect
-            </h2>
-          </div>
+        <TabsContent value="files" className="flex flex-col gap-4">
+          <SectionIntro title="Files & inspect" />
 
           <Endpoint method="GET" path="/api/files">
             <p>
@@ -435,10 +430,10 @@ curl -s "$BASE/api/files/<id>?token=<accessToken>"`}</DocsCode>
             <DocsCode>{`curl -s "$BASE/api/info"
 # { "bots": 1, "chunkSize": 8388608, "workers": 3 }`}</DocsCode>
           </Endpoint>
-        </section>
+        </TabsContent>
 
-        <section id="ops" className="scroll-mt-24 space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight">Ops</h2>
+        <TabsContent value="ops" className="flex flex-col gap-4">
+          <SectionIntro title="Ops" />
 
           <Endpoint method="GET" path="/healthz">
             <p>Liveness. Always 200 if the process is up.</p>
@@ -452,11 +447,11 @@ curl -s "$BASE/api/files/<id>?token=<accessToken>"`}</DocsCode>
             </p>
             <DocsCode>{`curl -s -o /dev/null -w "%{http_code}\\n" "$BASE/readyz"`}</DocsCode>
           </Endpoint>
-        </section>
+        </TabsContent>
 
-        <section id="notes" className="scroll-mt-24 space-y-3 pb-6">
-          <h2 className="text-lg font-semibold tracking-tight">Notes</h2>
-          <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+        <TabsContent value="notes" className="flex flex-col gap-3 pb-6">
+          <SectionIntro title="Notes" />
+          <ul className="flex list-disc flex-col gap-2 pl-5 text-sm text-muted-foreground">
             <li>
               Errors are JSON:{" "}
               <code className="font-mono text-foreground">{`{ "message": "…" }`}</code>
@@ -490,8 +485,8 @@ curl -s "$BASE/api/files/<id>?token=<accessToken>"`}</DocsCode>
               <code>Referrer-Policy: no-referrer</code>.
             </li>
           </ul>
-        </section>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

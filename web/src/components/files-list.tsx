@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
 import { TokenRevealPanel, type TokenReveal } from "@/components/token-reveal";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DataTable, selectColumn } from "@/components/ui/data-table";
@@ -28,6 +29,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
@@ -563,23 +572,29 @@ function OwnedFilesList() {
       )}
 
       {error && (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {files.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
-          <FolderOpen className="size-6 text-muted-foreground" aria-hidden />
-          <h2 className="font-semibold">No files yet</h2>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            Upload while signed in to see files here with visibility and delete
-            controls.
-          </p>
-          <Link href="/" className={buttonVariants({ size: "sm" })}>
-            Upload
-          </Link>
-        </div>
+        <Empty className="border border-dashed border-border py-16">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <FolderOpen aria-hidden />
+            </EmptyMedia>
+            <EmptyTitle>No files yet</EmptyTitle>
+            <EmptyDescription>
+              Upload while signed in to see files here with visibility and delete
+              controls.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Link href="/" className={buttonVariants({ size: "sm" })}>
+              Upload
+            </Link>
+          </EmptyContent>
+        </Empty>
       ) : (
         <DataTable
           columns={columns}
@@ -661,17 +676,21 @@ function LocalFilesList() {
 
   if (files.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
-        <FolderOpen className="size-6 text-muted-foreground" aria-hidden />
-        <h1 className="font-semibold">No files yet</h1>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          Anonymous uploads in this browser are listed here.{" "}
-          <Link href="/signin" className="underline-offset-2 hover:underline">
-            Sign in
-          </Link>{" "}
-          to own files on the server (longer retention, visibility, delete).
-        </p>
-      </div>
+      <Empty className="border border-dashed border-border py-16">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FolderOpen aria-hidden />
+          </EmptyMedia>
+          <EmptyTitle>No files yet</EmptyTitle>
+          <EmptyDescription>
+            Anonymous uploads in this browser are listed here.{" "}
+            <Link href="/signin" className="underline-offset-2 hover:underline">
+              Sign in
+            </Link>{" "}
+            to own files on the server (longer retention, visibility, delete).
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
