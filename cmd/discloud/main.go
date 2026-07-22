@@ -55,22 +55,22 @@ func run(log *slog.Logger) error {
 	}
 	defer ca.Close()
 
-		dc := discord.New(cfg.DiscordBotToken, cfg.DiscordChannelID)
-		if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
-			return err
-		}
-		salt, err := config.LoadOrCreateVisitorHashSalt(config.VisitorHashSaltFile)
-		if err != nil {
-			return err
-		}
-		srv := server.New(log, st, ca, dc, server.Options{
-			PublicBaseURL: cfg.APIURL,
-			VisitorSalt:   salt,
-			WebOrigin:     cfg.WebOrigin,
-			CookieSecure:  cfg.CookieSecure,
-			Keys:          auth.DeriveKeys(cfg.AppSecret),
-		})
-		go srv.RunCleanup(ctx)
+	dc := discord.New(cfg.DiscordBotToken, cfg.DiscordChannelID)
+	if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
+		return err
+	}
+	salt, err := config.LoadOrCreateVisitorHashSalt(config.VisitorHashSaltFile)
+	if err != nil {
+		return err
+	}
+	srv := server.New(log, st, ca, dc, server.Options{
+		PublicBaseURL: cfg.APIURL,
+		VisitorSalt:   salt,
+		WebOrigin:     cfg.WebOrigin,
+		CookieSecure:  cfg.CookieSecure,
+		Keys:          auth.DeriveKeys(cfg.AppSecret),
+	})
+	go srv.RunCleanup(ctx)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,
