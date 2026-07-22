@@ -135,6 +135,28 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Single-chunk + inline: 302 to Discord CDN so file bytes skip our egress.
+	// Multi-chunk still needs proxy stitching; ?download=1 keeps Content-Disposition.
+	if r.URL.Query().Get("download") != "1" && len(f.Parts) == 1 {
+		cdnURL, err := s.resolveCDNURL(r.Context(), f.Parts[0])
+		if err != nil {
+			s.log.Error("resolve cdn failed", "file", f.Name, "error", err)
+			http.Error(w, "Chunk unavailable; re-upload the file", http.StatusBadGateway)
+			return
+		}
+		if r.Method != http.MethodHead {
+			served := f.Size
+			if rh := r.Header.Get("Range"); rh != "" {
+				if br, err := parseRange(rh, f.Size, rangeWindow); err == nil {
+					served = br.end - br.start + 1
+				}
+			}
+			s.trackAsync(f.ID, accessKind(r), served, r)
+		}
+		http.Redirect(w, r, cdnURL, http.StatusFound)
+		return
+	}
+
 	w.Header().Set("Accept-Ranges", "bytes")
 	ct := mime.TypeByExtension(filepath.Ext(f.Name))
 	if ct == "" {
@@ -175,7 +197,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Length", strconv.FormatInt(full.end-full.start+1, 10))
 	w.WriteHeader(status)
-	if r.Method == http.MethodHead {
+
+	served := full.end - full.start + 1
+	if r.Method != http.MethodHead {
+		s.trackAsync(f.ID, accessKind(r), served, r)
+	} else {
 		return
 	}
 
@@ -293,7 +319,7 @@ func (s *Server) baseURL(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-// fileLinks builds share/download URLs from PUBLIC_BASE_URL (or request host).
+// fileLinks builds share/download URLs from API_URL (or request host).
 func fileLinks(base, fileID, fileName string, fileSize int64) map[string]any {
 	return map[string]any{
 		"fileId":          fileID,

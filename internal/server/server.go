@@ -22,6 +22,8 @@ type Store interface {
 	GetChunks(ctx context.Context, hashes []string) (map[string]store.Chunk, error)
 	DeleteChunksByMessageID(ctx context.Context, messageID string) error
 	EnsureBots(ctx context.Context, count int) error
+	RecordEvent(ctx context.Context, e store.Event) error
+	GetFileInspect(ctx context.Context, id string) (store.FileInspect, error)
 	Ping(ctx context.Context) error
 }
 
@@ -38,18 +40,20 @@ type Server struct {
 	cache         Cache
 	discord       *discord.Client
 	publicBaseURL string
+	visitorSalt   string
 	// cdn streams chunk bytes from the Discord CDN; no overall timeout so
 	// slow client downloads aren't cut off mid-stream.
 	cdn *http.Client
 }
 
-func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, publicBaseURL string) *Server {
+func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, publicBaseURL, visitorSalt string) *Server {
 	return &Server{
 		log:           log,
 		store:         st,
 		cache:         ca,
 		discord:       dc,
 		publicBaseURL: publicBaseURL,
+		visitorSalt:   visitorSalt,
 		cdn:           &http.Client{},
 	}
 }
@@ -62,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload/complete", s.handleUploadComplete)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/{id}", s.handleGetFile)
+	mux.HandleFunc("GET /api/files/{id}/inspect", s.handleInspect)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /f/{id}", s.handleDownload)
 	mux.HandleFunc("GET /f/{id}/{name...}", s.handleDownload)

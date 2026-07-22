@@ -28,7 +28,7 @@ export function apiURL(path: string): string {
   return `${base}${p}`;
 }
 
-/** Rebuild share links from the runtime API origin (PUBLIC_BASE_URL inject). */
+/** Rebuild share links from the runtime API origin (API_URL inject). */
 export function withPublicURLs(result: UploadResult): UploadResult {
   const id = result.fileId;
   const name = result.fileName;
@@ -52,4 +52,36 @@ export async function fetchFileMeta(
   if (res.status === 404) throw new Error("File not found on server");
   if (!res.ok) throw new Error(`Could not load metadata (${res.status})`);
   return (await res.json()) as FileMeta;
+}
+
+export interface FileInspect {
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  chunkSize: number;
+  chunkCount: number;
+  createdAt: string;
+  views: number;
+  downloads: number;
+  ranges: number;
+  bytesServed: number;
+  uniqueVisitors: number;
+  lastAccessAt?: string;
+  url: string;
+  longURL: string;
+  downloadURL: string;
+  longDownloadURL: string;
+}
+
+export async function fetchFileInspect(
+  fileId: string,
+  init?: RequestInit,
+): Promise<FileInspect> {
+  const res = await fetch(apiURL(`/api/files/${fileId}/inspect`), {
+    cache: "no-store",
+    ...init,
+  });
+  if (res.status === 404) throw new Error("File not found on server");
+  if (!res.ok) throw new Error(`Could not load inspect data (${res.status})`);
+  return (await res.json()) as FileInspect;
 }

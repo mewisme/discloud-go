@@ -18,7 +18,7 @@ URLs (cached in Valkey).
    ```
 
    Set `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`. Behind Cloudflare, also set
-   `PUBLIC_BASE_URL` to your public **API** origin (not the `:3000` UI).
+   `API_URL` to your public **API** origin (not the `:3000` UI).
 
 3. Run:
 
@@ -37,13 +37,13 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 
 The API is published on **:8080**. Point Cloudflare at it for `/api/*`, `/f/*`,
 and `/readyz`. The web UI on **:3000** calls that origin via runtime
-`PUBLIC_BASE_URL` (no rebuild — recreate the web container after changing it).
+`API_URL` (no rebuild — recreate the web container after changing it).
 
 ## Development
 
 ```bash
 go run ./cmd/discloud          # needs DATABASE_URL, VALKEY_URL, Discord env
-cd web && pnpm i && pnpm dev  # PUBLIC_BASE_URL in web/.env.local (default :8080)
+cd web && pnpm i && pnpm dev  # API_URL in web/.env.local (default :8080)
 ```
 
 ```bash
@@ -61,8 +61,9 @@ API is on **:8080** (`http://localhost:8080` or your public API origin). Docs UI
 | `POST /api/upload?fileName=` | Whole-file upload (raw body) |
 | `POST /api/chunks` · `GET/HEAD /api/chunks/{sha256}` | Chunked / resumable |
 | `POST /api/upload/complete` | Assemble from chunk hashes |
-| `GET /f/{id}` | Download (`Range`, `?download=1`, `?json=1` metadata) |
+| `GET /f/{id}` | Download (`Range`, `?download=1`, `?json=1` metadata). Single-chunk inline views redirect to Discord CDN |
 | `GET /api/files` · `/api/files/{id}` | List / metadata |
+| `GET /api/files/{id}/inspect` | Analytics + share URLs |
 | `GET /api/info` | Bots / upload worker hint |
 | `GET /healthz` · `/readyz` | Health |
 
@@ -78,7 +79,8 @@ curl -OJ "$BASE/f/<fileId>?download=1"
 | --- | --- |
 | `DISCORD_BOT_TOKEN` | Required. Comma-separated tokens → parallel Discord uploads (one worker per bot) |
 | `DISCORD_CHANNEL_ID` | Required. Channel that holds chunks |
-| `PUBLIC_BASE_URL` | Public API origin for share links and the web UI (default `http://localhost:8080`). Recreate api+web after change — no image rebuild |
+| `API_URL` | Public API origin for share links and the web UI (default `http://localhost:8080`). Recreate api+web after change — no image rebuild |
+| `VISITOR_HASH_SALT` | Salt for unique-visitor hashes on inspect analytics |
 | `DISCLOUD_TAG` | Image tag (default `latest`) |
 | `POSTGRES_PASSWORD` | Compose DB password (default `discloud`) |
 

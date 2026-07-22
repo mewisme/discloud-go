@@ -58,7 +58,12 @@ func run(log *slog.Logger) error {
 	if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
 		return err
 	}
-	srv := server.New(log, st, ca, dc, cfg.PublicBaseURL)
+	salt := cfg.VisitorHashSalt
+	if salt == "" {
+		salt = "discloud:" + cfg.DiscordChannelID
+		log.Warn("VISITOR_HASH_SALT unset; using derived salt — set an explicit salt for stable unique-visitor hashes across deploys")
+	}
+	srv := server.New(log, st, ca, dc, cfg.APIURL, salt)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,

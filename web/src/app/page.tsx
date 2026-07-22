@@ -6,12 +6,12 @@ const features = [
   {
     icon: InfinityIcon,
     title: "Unlimited storage",
-    text: "Files are split into 8 MB chunks and stored as Discord attachments — no size ceiling.",
+    text: "Files are split into 8 MB chunks and stored in the cloud — no size ceiling.",
   },
   {
     icon: Zap,
     title: "Fast transfers",
-    text: "Chunks upload concurrently and downloads stream straight from the CDN with range support.",
+    text: "Chunks upload concurrently and downloads stream from the CDN with range support.",
   },
   {
     icon: Shield,
@@ -28,8 +28,7 @@ export default function Home() {
           Unlimited cloud storage
         </h1>
         <p className="text-balance text-muted-foreground">
-          Upload any file and get a shareable link. Your data lives as chunked
-          attachments on Discord — free, durable, and fast.
+          Upload any file and get a shareable link. Chunked, durable, and fast.
         </p>
       </section>
 

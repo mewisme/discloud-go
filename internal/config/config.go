@@ -15,9 +15,11 @@ type Config struct {
 	// tokens that divide uploads across bots.
 	DiscordBotToken  string
 	DiscordChannelID string
-	// PublicBaseURL is used to build share links. When empty, links are
+	// APIURL is used to build share links. When empty, links are
 	// derived from the incoming request's Host and forwarded proto.
-	PublicBaseURL string
+	APIURL string
+	// VisitorHashSalt salts IP+UA hashes for unique visitor counts.
+	VisitorHashSalt string
 }
 
 func Load() (Config, error) {
@@ -27,7 +29,8 @@ func Load() (Config, error) {
 		ValkeyURL:        os.Getenv("VALKEY_URL"),
 		DiscordBotToken:  strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
 		DiscordChannelID: os.Getenv("DISCORD_CHANNEL_ID"),
-		PublicBaseURL:    strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")),
+		APIURL:           strings.TrimSpace(os.Getenv("API_URL")),
+		VisitorHashSalt:  strings.TrimSpace(os.Getenv("VISITOR_HASH_SALT")),
 	}
 	for name, v := range map[string]string{
 		"DATABASE_URL":       c.DatabaseURL,

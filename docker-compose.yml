@@ -11,7 +11,8 @@ services:
       VALKEY_URL: valkey://valkey:6379
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set in .env}
       DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:?set in .env}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      API_URL: ${API_URL:-http://localhost:8080}
+      VISITOR_HASH_SALT: ${VISITOR_HASH_SALT:-}
       GOMEMLIMIT: 96MiB
       GOGC: "50"
     ports:
@@ -32,7 +33,7 @@ services:
     pull_policy: always
     environment:
       # Browser-facing API origin (not the Docker-internal hostname).
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      API_URL: ${API_URL:-http://localhost:8080}
       NODE_OPTIONS: --max-old-space-size=192
     ports:
       - "3000:3000"

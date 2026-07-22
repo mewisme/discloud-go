@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     default: "DisCloud",
     template: "%s | DisCloud",
   },
-  description: "Unlimited cloud storage backed by Discord attachments.",
+  description: "Unlimited cloud storage. Upload, share, and download files.",
 };
 
 export default async function RootLayout({
@@ -33,7 +33,7 @@ export default async function RootLayout({
 }>) {
   await connection();
   const apiOrigin = (
-    process.env.PUBLIC_BASE_URL || "http://localhost:8080"
+    process.env.API_URL || "http://localhost:8080"
   ).replace(/\/$/, "");
 
   return (
@@ -81,7 +81,7 @@ export default async function RootLayout({
             {children}
           </main>
           <footer className="border-t border-border/60 py-6 text-center text-xs text-muted-foreground">
-            DisCloud — files are chunked and stored as Discord attachments.
+            DisCloud — upload, share, and download files.
           </footer>
           <Toaster richColors position="bottom-right" />
         </ThemeProvider>

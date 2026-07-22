@@ -1,10 +1,23 @@
 "use client";
 
-import { CloudUpload, FileIcon, Loader2, RotateCcw, X } from "lucide-react";
+import {
+  CloudUpload,
+  Download,
+  ExternalLink,
+  FileIcon,
+  Loader2,
+  RotateCcw,
+  Search,
+  Share2,
+  X,
+} from "lucide-react";
+import Link from "next/link";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
-import { Button } from "@/components/ui/button";
+import { ShareQR } from "@/components/share-qr";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -83,7 +96,7 @@ export function Uploader() {
               : "Drop files here, or click to browse"}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Multiple files OK. Stored in 8 MB chunks on Discord.
+            Multiple files OK. Split into 8 MB chunks automatically.
           </p>
         </div>
         <input
@@ -204,32 +217,93 @@ export function Uploader() {
       {showResult && state.lastResult && (
         <Card className="w-full">
           <CardContent className="flex flex-col gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <FileIcon className="size-5 text-primary" aria-hidden />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="truncate font-medium">
                   {state.lastResult.fileName}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {formatBytes(state.lastResult.fileSize)}
                 </p>
+                <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                  {state.lastResult.fileId}
+                </p>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
-                className="ml-auto"
+                className="shrink-0"
                 onClick={() => clearDone()}
               >
                 <RotateCcw aria-hidden /> Dismiss
               </Button>
             </div>
-            <LinkRow label="Share link" href={state.lastResult.longURL} />
-            <LinkRow
-              label="Direct download"
-              href={state.lastResult.longDownloadURL}
-            />
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  const r = state.lastResult!;
+                  try {
+                    if (typeof navigator.share === "function") {
+                      await navigator.share({
+                        title: r.fileName,
+                        url: r.longURL,
+                      });
+                      return;
+                    }
+                    await navigator.clipboard.writeText(r.longURL);
+                    toast.success("Link copied to clipboard");
+                  } catch (err) {
+                    if (
+                      err instanceof DOMException &&
+                      err.name === "AbortError"
+                    ) {
+                      return;
+                    }
+                    toast.error("Could not share link");
+                  }
+                }}
+              >
+                <Share2 aria-hidden /> Share
+              </Button>
+              <a
+                href={state.lastResult.longURL}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <ExternalLink aria-hidden /> Open
+              </a>
+              <a
+                href={state.lastResult.longDownloadURL}
+                className={buttonVariants({ variant: "default", size: "sm" })}
+              >
+                <Download aria-hidden /> Download
+              </a>
+              <Link
+                href={`/i/${state.lastResult.fileId}`}
+                className={buttonVariants({ variant: "secondary", size: "sm" })}
+              >
+                <Search aria-hidden /> Inspect
+              </Link>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+              <ShareQR value={state.lastResult.longURL} />
+              <div className="flex flex-col gap-3">
+                <LinkRow label="Share link" href={state.lastResult.longURL} />
+                <LinkRow
+                  label="Download"
+                  href={state.lastResult.longDownloadURL}
+                />
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

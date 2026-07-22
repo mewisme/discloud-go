@@ -89,15 +89,33 @@ func (f *fakeDiscord) messageJSON(id string) map[string]any {
 }
 
 type memStore struct {
-	mu     sync.Mutex
-	files  map[string]store.File
-	chunks map[string]store.Chunk
+	mu       sync.Mutex
+	files    map[string]store.File
+	chunks   map[string]store.Chunk
+	stats    map[string]*fileStats
+	visitors map[string]map[string]struct{}
+}
+
+type fileStats struct {
+	views, downloads, ranges, bytesServed, uniqueVisitors int64
+	lastAccess                                            time.Time
+}
+
+func (m *memStore) ensureStats(id string) *fileStats {
+	if m.stats == nil {
+		m.stats = map[string]*fileStats{}
+	}
+	if m.stats[id] == nil {
+		m.stats[id] = &fileStats{}
+	}
+	return m.stats[id]
 }
 
 func (m *memStore) CreateFile(_ context.Context, f store.File) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.files[f.ID] = f
+	m.ensureStats(f.ID)
 	return nil
 }
 
@@ -165,6 +183,58 @@ func (m *memStore) DeleteChunksByMessageID(_ context.Context, messageID string) 
 
 func (m *memStore) EnsureBots(context.Context, int) error { return nil }
 
+func (m *memStore) RecordEvent(_ context.Context, e store.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.files[e.FileID]; !ok {
+		return store.ErrNotFound
+	}
+	st := m.ensureStats(e.FileID)
+	switch e.Kind {
+	case store.EventView:
+		st.views++
+	case store.EventDownload:
+		st.downloads++
+	case store.EventRange:
+		st.ranges++
+	}
+	st.bytesServed += e.Bytes
+	st.lastAccess = time.Now().UTC()
+	if e.VisitorHash != "" {
+		if m.visitors == nil {
+			m.visitors = map[string]map[string]struct{}{}
+		}
+		if m.visitors[e.FileID] == nil {
+			m.visitors[e.FileID] = map[string]struct{}{}
+		}
+		if _, ok := m.visitors[e.FileID][e.VisitorHash]; !ok {
+			m.visitors[e.FileID][e.VisitorHash] = struct{}{}
+			st.uniqueVisitors++
+		}
+	}
+	return nil
+}
+
+func (m *memStore) GetFileInspect(_ context.Context, id string) (store.FileInspect, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.files[id]
+	if !ok {
+		return store.FileInspect{}, store.ErrNotFound
+	}
+	st := m.ensureStats(id)
+	var last *time.Time
+	if !st.lastAccess.IsZero() {
+		t := st.lastAccess
+		last = &t
+	}
+	return store.FileInspect{
+		File: f, Views: st.views, Downloads: st.downloads,
+		Ranges: st.ranges, BytesServed: st.bytesServed, UniqueVisitors: st.uniqueVisitors,
+		LastAccessAt: last, ChunkCount: len(f.Parts),
+	}, nil
+}
+
 func (m *memStore) Ping(context.Context) error { return nil }
 
 type memCache struct {
@@ -202,7 +272,7 @@ func newTestServerWithTokens(t *testing.T, tokens string) (*httptest.Server, *fa
 	dc.BaseURL = discordTS.URL
 	ca := &memCache{urls: map[string]string{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, "")
+	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, "", "test-salt")
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fake, ca
@@ -244,14 +314,14 @@ func TestInfoWorkersScaleWithBots(t *testing.T) {
 	}
 }
 
-func TestUploadLinksUsePublicBaseURL(t *testing.T) {
+func TestUploadLinksUseAPIURL(t *testing.T) {
 	fake, discordTS := newFakeDiscord(t)
 	dc := discord.New("test-token", "test-channel")
 	dc.BaseURL = discordTS.URL
 	ca := &memCache{urls: map[string]string{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	const public = "https://files.example.com"
-	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, public)
+	srv := New(log, &memStore{files: map[string]store.File{}, chunks: map[string]store.Chunk{}}, ca, dc, public, "test-salt")
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -412,6 +482,55 @@ func TestDownloadNotFound(t *testing.T) {
 	}
 }
 
+func TestSingleChunkRedirectsToCDN(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	payload := []byte("tiny file for redirect")
+	resp, err := http.Post(ts.URL+"/api/upload?fileName=tiny.txt",
+		"application/octet-stream", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var up struct {
+		FileID string `json:"fileId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		t.Fatal(err)
+	}
+
+	noFollow := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	redir, err := noFollow.Get(ts.URL + "/f/" + up.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer redir.Body.Close()
+	if redir.StatusCode != http.StatusFound {
+		t.Fatalf("inline status = %d, want 302", redir.StatusCode)
+	}
+	loc := redir.Header.Get("Location")
+	if !strings.Contains(loc, "/attachments/") {
+		t.Fatalf("Location = %q, want Discord CDN attachment URL", loc)
+	}
+
+	// ?download=1 keeps proxy so Content-Disposition filename works.
+	dl, err := noFollow.Get(ts.URL + "/f/" + up.FileID + "?download=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dl.Body.Close()
+	if dl.StatusCode != http.StatusOK {
+		t.Fatalf("download status = %d, want 200 (proxied)", dl.StatusCode)
+	}
+	got, _ := io.ReadAll(dl.Body)
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("download body = %q, want %q", got, payload)
+	}
+}
+
 func TestDownloadJSON(t *testing.T) {
 	ts, _, _ := newTestServer(t)
 	payload := []byte("hello json meta")
@@ -458,5 +577,75 @@ func TestDownloadJSON(t *testing.T) {
 	defer missing.Body.Close()
 	if missing.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing status = %d", missing.StatusCode)
+	}
+}
+
+func TestInspectTracking(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	payload := []byte("track me please!!")
+	resp, err := http.Post(ts.URL+"/api/upload?fileName=track.bin",
+		"application/octet-stream", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var up struct {
+		FileID string `json:"fileId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&up); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	view, err := http.Get(ts.URL + "/f/" + up.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, view.Body)
+	view.Body.Close()
+
+	dl, err := http.Get(ts.URL + "/f/" + up.FileID + "?download=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, dl.Body)
+	dl.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/f/"+up.FileID, nil)
+	req.Header.Set("Range", "bytes=0-3")
+	rr, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, rr.Body)
+	rr.Body.Close()
+
+	// Async track — wait briefly for goroutines.
+	deadline := time.Now().Add(2 * time.Second)
+	var insp struct {
+		Views      int64 `json:"views"`
+		Downloads  int64 `json:"downloads"`
+		Ranges     int64 `json:"ranges"`
+		ChunkCount int   `json:"chunkCount"`
+	}
+	for {
+		ir, err := http.Get(ts.URL + "/api/files/" + up.FileID + "/inspect")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.NewDecoder(ir.Body).Decode(&insp); err != nil {
+			ir.Body.Close()
+			t.Fatal(err)
+		}
+		ir.Body.Close()
+		if insp.Views >= 1 && insp.Downloads >= 1 && insp.Ranges >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("counters not updated: %+v", insp)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if insp.ChunkCount < 1 {
+		t.Fatalf("chunkCount = %d", insp.ChunkCount)
 	}
 }

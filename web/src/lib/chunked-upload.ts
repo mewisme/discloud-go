@@ -4,7 +4,7 @@ import { apiURL, type UploadResult } from "@/lib/api";
  * Chunked upload: split into 8 MB pieces matching the server's storage chunk
  * size, SHA-256 hash each, skip uploads the server already has, then assemble.
  *
- * Worker count comes from GET /api/info (Discord bot token count).
+ * Worker count comes from GET /api/info.
  */
 const CHUNK_SIZE = 8 * 1024 * 1024;
 const DEFAULT_WORKERS = 3;
@@ -12,7 +12,7 @@ const ATTEMPTS = 3;
 
 let workersPromise: Promise<number> | null = null;
 
-/** Parallel chunk POSTs — scales with Discord bot tokens on the server. */
+/** Parallel chunk POSTs — sized from GET /api/info.workers. */
 export async function uploadWorkers(): Promise<number> {
   if (!workersPromise) {
     workersPromise = fetch(apiURL("/api/info"), { cache: "no-store" })
