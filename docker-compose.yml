@@ -80,7 +80,7 @@ services:
       - -c
       - checkpoint_completion_target=0.9
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U discloud -d discloud"]
       interval: 5s
