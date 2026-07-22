@@ -101,6 +101,87 @@ func ReadPasswordPrompt(label string) (string, error) {
 	return pw, nil
 }
 
+// PromptDefault asks for a line with def pre-filled. Enter keeps def.
+// On a TTY the value is editable in-place; otherwise empty input uses def.
+func PromptDefault(label, def string) (string, error) {
+	if JSON {
+		return "", fmt.Errorf("%s required with --json", fieldName(label))
+	}
+	if !IsTTY(os.Stdin) {
+		return "", fmt.Errorf("%s required", fieldName(label))
+	}
+	w := os.Stderr
+	promptIcon(w)
+	fmt.Fprint(w, label)
+	fd := int(os.Stdin.Fd())
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		// Fallback: show default in brackets; empty line keeps it.
+		on := writerColor(w)
+		hint := ""
+		if def != "" {
+			hint = Dim(on, "["+def+"] ")
+		}
+		fmt.Fprint(w, hint)
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		v := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
+		if v == "" {
+			v = def
+		}
+		finishPrompt(w, true, label, v)
+		return v, nil
+	}
+	defer term.Restore(fd, state)
+	fmt.Fprint(w, def)
+	v, err := readLinePrefill(os.Stdin, w, []byte(def))
+	if err != nil {
+		return "", err
+	}
+	finishPrompt(w, true, label, v)
+	return v, nil
+}
+
+// readLinePrefill edits a pre-filled buffer in raw mode (visible chars).
+func readLinePrefill(r io.Reader, w io.Writer, buf []byte) (string, error) {
+	var b [1]byte
+	for {
+		n, err := r.Read(b[:])
+		if n > 0 {
+			switch b[0] {
+			case '\r', '\n':
+				fmt.Fprint(w, "\r\n")
+				return string(buf), nil
+			case 127, '\b':
+				if len(buf) > 0 {
+					buf = buf[:len(buf)-1]
+					fmt.Fprint(w, "\b \b")
+				}
+			case 3: // Ctrl+C
+				fmt.Fprint(w, "\r\n")
+				return "", fmt.Errorf("interrupted")
+			case 4: // Ctrl+D
+				fmt.Fprint(w, "\r\n")
+				return string(buf), nil
+			default:
+				if b[0] >= 32 && b[0] < 127 {
+					buf = append(buf, b[0])
+					fmt.Fprint(w, string(b[0]))
+				}
+			}
+		}
+		if err == io.EOF {
+			fmt.Fprint(w, "\r\n")
+			return string(buf), nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+}
+
 // readPasswordMasked reads byte-by-byte, echoes "*", supports backspace.
 // Enter submits; Ctrl+C aborts. Used after the terminal is in raw mode.
 func readPasswordMasked(r io.Reader, w io.Writer) (string, error) {
@@ -295,6 +376,11 @@ func clearLinesUp(w io.Writer, up int) {
 		return
 	}
 	fmt.Fprintf(w, "\033[%dA\r\033[J", up)
+}
+
+// ClearLinesUp moves the cursor up and clears to end of screen (TTY only).
+func ClearLinesUp(w io.Writer, up int) {
+	clearLinesUp(w, up)
 }
 
 func pickNumber(w io.Writer, r io.Reader, n int) (int, error) {

@@ -98,9 +98,32 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Write base/origin to the user config.json",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			if base == "" && origin == "" {
-				return fmt.Errorf("pass --base and/or --origin")
+			cfg := client.DefaultConfig()
+			baseSet := cmd.Flags().Changed("base")
+			originSet := cmd.Flags().Changed("origin")
+
+			if !baseSet && !originSet {
+				if flagJSON {
+					return fmt.Errorf("pass --base and/or --origin with --json")
+				}
+				var err error
+				base, err = ui.PromptDefault("Base: ", cfg.BaseURL)
+				if err != nil {
+					return err
+				}
+				origin, err = ui.PromptDefault("Origin: ", cfg.Origin)
+				if err != nil {
+					return err
+				}
+			} else {
+				if !baseSet {
+					base = "" // keep file value via SaveConfigFile merge
+				}
+				if !originSet {
+					origin = ""
+				}
 			}
+
 			path, savedBase, savedOrigin, err := client.SaveConfigFile(base, origin)
 			if err != nil {
 				return err
@@ -112,19 +135,11 @@ func newConfigSetCmd() *cobra.Command {
 					"origin": savedOrigin,
 				})
 			}
-			on := ui.ColorOn(os.Stdout)
-			ui.PrintSuccess("Wrote %s", ui.Cyan(on, path))
-			rows := make([][]string, 0, 2)
-			if savedBase != "" {
-				rows = append(rows, []string{"base", savedBase})
+			if !baseSet && !originSet {
+				// Wipe the two prompts; show full config in their place.
+				ui.ClearLinesUp(os.Stderr, 2)
 			}
-			if savedOrigin != "" {
-				rows = append(rows, []string{"origin", savedOrigin})
-			}
-			if len(rows) > 0 {
-				return ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{Title: "Config", Rows: rows}})
-			}
-			return nil
+			return printConfigTable(client.DefaultConfig())
 		}),
 	}
 	cmd.Flags().StringVar(&base, "base", "", "API origin to save")
@@ -146,6 +161,10 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 			"file":    client.ConfigFilePath(),
 		})
 	}
+	return printConfigTable(cfg)
+}
+
+func printConfigTable(cfg client.Config) error {
 	return ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{
 		Title: "Config",
 		Rows: [][]string{

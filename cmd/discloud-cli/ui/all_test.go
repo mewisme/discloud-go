@@ -88,6 +88,19 @@ func TestFieldName(t *testing.T) {
 	}
 }
 
+func TestReadLinePrefill(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	// prefill "ab", backspace once, type "c", enter → "ac"
+	got, err := readLinePrefill(strings.NewReader("\x7fc\r"), &out, []byte("ab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ac" {
+		t.Fatalf("got %q want ac", got)
+	}
+}
+
 func TestConfirmDefaultNo(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
