@@ -103,6 +103,9 @@ scoops:
     description: "CLI client for DisCloud (Discord-backed file storage)"
     license: MIT
     skip_upload: true
+    # Alias: `discloud` → discloud-cli.exe (Scoop shim API).
+    post_install:
+      - 'shim "$dir\discloud-cli.exe" $global discloud'
     repository:
       owner: mewisme
       name: scoop-mew
@@ -117,6 +120,12 @@ homebrew_casks:
     description: "CLI client for DisCloud (Discord-backed file storage)"
     directory: Casks
     skip_upload: true
+    # Runs `discloud-cli completion <shell>` at cask install (Cobra).
+    generate_completions_from_executable:
+      executable: discloud-cli
+      base_name: discloud
+      shell_parameter_format: cobra
+      shells: [bash, zsh, fish]
     hooks:
       post:
         install: |
