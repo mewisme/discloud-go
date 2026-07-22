@@ -334,16 +334,85 @@ func pickIndex(w io.Writer, r io.Reader, labels []string) (int, error) {
 	return pickNumber(w, r, len(labels))
 }
 
+// PickChoice picks one of choices on a single prompt line:
+//
+//	? Visibility (↑↓): public
+//
+// ↑↓ (or digits) change the value; Enter confirms. On success writes a
+// checkmark line and returns clearExtra=1 for a later ClearLinesUp.
+func PickChoice(w io.Writer, r io.Reader, title string, choices []string, defaultChoice string) (choice string, clearExtra int, err error) {
+	if len(choices) == 0 {
+		return "", 0, fmt.Errorf("nothing to select")
+	}
+	start := 0
+	for i, c := range choices {
+		if c == defaultChoice {
+			start = i
+			break
+		}
+	}
+	on := writerColor(w)
+	hint := fmt.Sprintf("%s (↑↓): ", title)
+
+	in, okIn := r.(*os.File)
+	if okIn && IsTTY(in) && canRewritePrompt(w) {
+		fd := int(in.Fd())
+		state, err := term.MakeRaw(fd)
+		if err == nil {
+			defer term.Restore(fd, state)
+			idx, err := pickRaw(w, in, len(choices), start, func(idx int) string {
+				return fmt.Sprintf("%s %s%s", Yellow(on, "?"), hint, Cyan(on, choices[idx]))
+			})
+			if err != nil {
+				return "", 0, err
+			}
+			fmt.Fprintf(w, "\r\033[K%s %s: %s\n", Green(on, IconOK), title, Cyan(on, choices[idx]))
+			return choices[idx], 1, nil
+		}
+	}
+
+	promptIcon(w)
+	fmt.Fprint(w, hint)
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil {
+		return "", 0, fmt.Errorf("selection cancelled")
+	}
+	s := strings.TrimSpace(line)
+	if s == "" {
+		finishPrompt(w, true, hint, choices[start])
+		return choices[start], 1, nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil || v < 1 || v > len(choices) {
+		finishPrompt(w, false, hint, s)
+		return "", 0, fmt.Errorf("invalid selection")
+	}
+	finishPrompt(w, true, hint, choices[v-1])
+	return choices[v-1], 1, nil
+}
+
 // PickFile prints a file table then lets the user pick by ↑↓ or index.
 // On success in a TTY, the table and prompt are cleared so the caller can
 // replace them with the next screen (e.g. inspect).
 func PickFile(w io.Writer, r io.Reader, files []File) (int, error) {
+	idx, _, err := pickFile(w, r, files, true)
+	return idx, err
+}
+
+// PickFileStay is like PickFile but leaves the table on screen. On success it
+// rewrites the select line to a checkmark and returns clearLines for a later
+// ClearLinesUp (table + finished select line). Cursor sits on the next line.
+func PickFileStay(w io.Writer, r io.Reader, files []File) (idx, clearLines int, err error) {
+	return pickFile(w, r, files, false)
+}
+
+func pickFile(w io.Writer, r io.Reader, files []File, clear bool) (idx, clearLines int, err error) {
 	if len(files) == 0 {
-		return -1, fmt.Errorf("nothing to select")
+		return -1, 0, fmt.Errorf("nothing to select")
 	}
 	tableLines := len(files) + 4 // rule + header + rule + rows + rule
 	if err := printPickFileTable(w, files); err != nil {
-		return -1, err
+		return -1, 0, err
 	}
 	in, okIn := r.(*os.File)
 	if okIn && IsTTY(in) && canRewritePrompt(w) {
@@ -355,20 +424,26 @@ func PickFile(w io.Writer, r io.Reader, files []File) (int, error) {
 				return files[i].Name
 			})
 			if err != nil {
-				return -1, err
+				return -1, 0, err
 			}
-			// Cursor is still on the prompt line — wipe table + prompt.
-			clearLinesUp(w, tableLines)
-			return idx, nil
+			if clear {
+				clearLinesUp(w, tableLines)
+				return idx, 0, nil
+			}
+			on := writerColor(w)
+			fmt.Fprintf(w, "\r\033[K%s %s\n", Green(on, IconOK), Cyan(on, files[idx].ID))
+			return idx, tableLines + 1, nil
 		}
 	}
-	idx, err := pickNumber(w, r, len(files))
+	idx, err = pickNumber(w, r, len(files))
 	if err != nil {
-		return -1, err
+		return -1, 0, err
 	}
-	// Cursor is one line below the finished prompt.
-	clearLinesUp(w, tableLines+1)
-	return idx, nil
+	if clear {
+		clearLinesUp(w, tableLines+1)
+		return idx, 0, nil
+	}
+	return idx, tableLines + 1, nil
 }
 
 func clearLinesUp(w io.Writer, up int) {
@@ -408,7 +483,22 @@ func pickNumber(w io.Writer, r io.Reader, n int) (int, error) {
 func pickFileRaw(w io.Writer, in *os.File, n int, labelAt func(int) string) (int, error) {
 	on := writerColor(w)
 	hint := fmt.Sprintf("Select (1-%d, ↑↓): ", n)
-	cur := 0
+	return pickRaw(w, in, n, 0, func(idx int) string {
+		return fmt.Sprintf("%s %s%s  %s",
+			Yellow(on, "?"), hint,
+			Cyan(on, strconv.Itoa(idx+1)),
+			Dim(on, labelAt(idx)))
+	})
+}
+
+// pickRaw runs after stdin is already in raw mode. line(idx) is the full prompt
+// contents (no cursor control); pickRaw wraps it with \r\033[K. start is the
+// initial 0-based selection (clamped into range).
+func pickRaw(w io.Writer, in *os.File, n, start int, line func(idx int) string) (int, error) {
+	cur := start
+	if cur < 0 || cur >= n {
+		cur = 0
+	}
 	typed := ""
 
 	draw := func() {
@@ -419,10 +509,7 @@ func pickFileRaw(w io.Writer, in *os.File, n int, labelAt func(int) string) (int
 			}
 		}
 		cur = idx
-		fmt.Fprintf(w, "\r\033[K%s %s%s  %s",
-			Yellow(on, "?"), hint,
-			Cyan(on, strconv.Itoa(idx+1)),
-			Dim(on, labelAt(idx)))
+		fmt.Fprintf(w, "\r\033[K%s", line(idx))
 	}
 	draw()
 

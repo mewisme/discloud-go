@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
@@ -143,30 +144,43 @@ func newFilesVisibilityCmd() *cobra.Command {
 				return err
 			}
 			var id, vis string
+			clearLines := 0
+			visClear := 0
 			switch len(args) {
 			case 0:
-				vis, err = ui.ResolveArg("", "Visibility (public|private): ")
+				var cur string
+				id, cur, clearLines, err = pickFileStayVisibility(c)
 				if err != nil {
 					return err
 				}
-				id, err = resolveFileID(c, "")
+				vis, visClear, err = resolveVisibility("", cur)
 				if err != nil {
 					return err
 				}
 			case 1:
-				vis = args[0]
-				id, err = resolveFileID(c, "")
+				if args[0] == "public" || args[0] == "private" {
+					vis = args[0]
+					id, _, clearLines, err = pickFileStayVisibility(c)
+				} else {
+					id = args[0]
+					cur, err := currentVisibility(c, id)
+					if err != nil {
+						return err
+					}
+					vis, visClear, err = resolveVisibility("", cur)
+				}
 				if err != nil {
 					return err
 				}
 			default:
 				id = args[0]
-				vis = args[1]
-			}
-			if vis != "public" && vis != "private" {
-				return fmt.Errorf("visibility must be public or private")
+				vis, visClear, err = resolveVisibility(args[1], "")
+				if err != nil {
+					return err
+				}
 			}
 
+			confirmExtra := 0
 			if vis == "public" && !yes {
 				cur, err := currentVisibility(c, id)
 				if err != nil {
@@ -179,8 +193,12 @@ func newFilesVisibilityCmd() *cobra.Command {
 					if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Make %s public? This invalidates the private token.", id)) {
 						return fmt.Errorf("aborted")
 					}
+					confirmExtra = 1
 				}
 			}
+
+			// Wipe file table + select lines before spinner / result table.
+			ui.ClearLinesUp(os.Stderr, clearLines+visClear+confirmExtra)
 
 			raw, err := ui.WaitVal("Updating visibility…", func() (map[string]any, error) {
 				return c.SetVisibility(id, vis)
@@ -195,12 +213,21 @@ func newFilesVisibilityCmd() *cobra.Command {
 			if flagJSON {
 				return writeJSON(item)
 			}
-			on := ui.ColorOn(os.Stdout)
-			ui.PrintSuccess("%s is now %s", ui.Cyan(on, item.FileID), ui.VisibilityLabel(on, item.Visibility))
-			if item.AccessToken != "" {
-				fmt.Printf("%s %s\n", ui.Yellow(on, ui.IconKey), ui.Cyan(on, item.AccessToken))
+			visLabel := item.Visibility
+			switch item.Visibility {
+			case "private":
+				visLabel = ui.IconLock + " private"
+			case "public":
+				visLabel = ui.IconUnlock + " public"
 			}
-			return nil
+			rows := [][]string{
+				{ui.IconOK, "File", id},
+				{ui.IconOK, "Visibility", visLabel},
+			}
+			if item.AccessToken != "" {
+				rows = append(rows, []string{ui.IconOK, "Token", item.AccessToken})
+			}
+			return ui.PrintGlyphTable(os.Stdout, rows)
 		}),
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
@@ -332,6 +359,50 @@ func resolveFileID(c *client.Client, id string) (string, error) {
 		return "", err
 	}
 	return files[idx].FileID, nil
+}
+
+// pickFileStayVisibility opens the file picker and keeps the table visible for
+// the next prompt (visibility). Returns the file id, its current visibility,
+// and how many stderr lines to ClearLinesUp after the follow-up prompts.
+func pickFileStayVisibility(c *client.Client) (id, cur string, clearLines int, err error) {
+	if flagJSON {
+		return "", "", 0, fmt.Errorf("file id required with --json (interactive picker disabled)")
+	}
+	if !ui.IsTTY(os.Stdin) {
+		return "", "", 0, fmt.Errorf("file id required (interactive picker needs a TTY)")
+	}
+	files, err := fetchFilesForPicker(c)
+	if err != nil {
+		return "", "", 0, err
+	}
+	if len(files) == 0 {
+		return "", "", 0, fmt.Errorf("no files to select")
+	}
+	idx, clearLines, err := ui.PickFileStay(os.Stderr, os.Stdin, toUIFiles(files))
+	if err != nil {
+		return "", "", 0, err
+	}
+	return files[idx].FileID, files[idx].Visibility, clearLines, nil
+}
+
+// resolveVisibility returns public|private, or opens a ↑↓ picker when empty.
+// defaultVis is the starting selection in the picker (usually the file's current visibility).
+// clearExtra is 1 when the picker left a result line on stderr.
+func resolveVisibility(arg, defaultVis string) (vis string, clearExtra int, err error) {
+	arg = strings.TrimSpace(arg)
+	if arg == "public" || arg == "private" {
+		return arg, 0, nil
+	}
+	if arg != "" {
+		return "", 0, fmt.Errorf("visibility must be public or private")
+	}
+	if flagJSON {
+		return "", 0, fmt.Errorf("visibility required with --json (interactive picker disabled)")
+	}
+	if !ui.IsTTY(os.Stdin) {
+		return "", 0, fmt.Errorf("visibility required (interactive picker needs a TTY)")
+	}
+	return ui.PickChoice(os.Stderr, os.Stdin, "Visibility", []string{"public", "private"}, defaultVis)
 }
 
 func fetchFilesForPicker(c *client.Client) ([]FileItem, error) {

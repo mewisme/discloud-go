@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/mewisme/discloud-go/internal/client"
 	"golang.org/x/term"
@@ -81,6 +80,63 @@ func printTable(w io.Writer, headers []string, rows [][]string, rightAlign []boo
 // PrintKVTable is a 2-column FIELD/VALUE table (labels dim, values typed-color).
 func PrintKVTable(w io.Writer, rows [][]string) error {
 	return printTable(w, []string{"FIELD", "VALUE"}, rows, nil, 1)
+}
+
+// PrintGlyphTable is a 3-column table: glyph | FIELD | VALUE (with headers).
+// Pass plain IconOK / IconFail / IconKey / etc. in column 0.
+func PrintGlyphTable(w io.Writer, rows [][]string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	on := false
+	if f, ok := w.(*os.File); ok {
+		on = ColorOn(f)
+	}
+	headers := []string{"", "FIELD", "VALUE"}
+	widths := contentWidths(headers, rows)
+	glyphW := widths[0]
+	fitWidths(widths, termWidth(w), 2)
+	widths[0] = glyphW // emoji are display-width 2; never shrink glyph col
+
+	rule := Dim(on, tableRule(widths))
+	fmt.Fprintln(w, rule)
+	fmt.Fprintln(w, tableRow(paintRow(headers, widths, nil, on, true), on))
+	fmt.Fprintln(w, rule)
+	for _, row := range rows {
+		glyph, field, value := "", "", ""
+		if len(row) > 0 {
+			glyph = row[0]
+		}
+		if len(row) > 1 {
+			field = row[1]
+		}
+		if len(row) > 2 {
+			value = row[2]
+		}
+		cells := []string{
+			paintGlyph(on, padRight(glyph, widths[0])),
+			Dim(on, padRight(field, widths[1])),
+			paintTyped(on, padRight(value, widths[2]), value, ansiCyan),
+		}
+		fmt.Fprintln(w, tableRow(cells, on))
+	}
+	fmt.Fprintln(w, rule)
+	return nil
+}
+
+func paintGlyph(on bool, padded string) string {
+	switch strings.TrimSpace(padded) {
+	case IconOK:
+		return Green(on, padded)
+	case IconFail:
+		return Red(on, padded)
+	case IconKey, IconLock:
+		return Yellow(on, padded)
+	case IconUnlock, IconInfo:
+		return Cyan(on, padded)
+	default:
+		return padded
+	}
 }
 
 // PrintKVBlocks draws one table with full-width section title blocks.
@@ -213,23 +269,43 @@ func PrintInspect(w io.Writer, item Inspect) error {
 	})
 }
 
-// contentWidths returns max rune width per column from headers and rows.
+// contentWidths returns max terminal display width per column.
 func contentWidths(headers []string, rows [][]string) []int {
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = utf8.RuneCountInString(h)
+		widths[i] = displayWidth(h)
 	}
 	for _, row := range rows {
 		for i, cell := range row {
 			if i >= len(widths) {
 				break
 			}
-			if n := utf8.RuneCountInString(cell); n > widths[i] {
+			if n := displayWidth(cell); n > widths[i] {
 				widths[i] = n
 			}
 		}
 	}
 	return widths
+}
+
+// displayWidth is terminal cell count. Non-BMP (emoji) = 2; ASCII/BMP = 1.
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		n += runeWidth(r)
+	}
+	return n
+}
+
+func runeWidth(r rune) int {
+	switch {
+	case r == 0 || r == '\n' || r == '\r' || r == '\t':
+		return 0
+	case r > 0xffff: // emoji / astral plane — double-width in terminals
+		return 2
+	default:
+		return 1
+	}
 }
 
 // fitWidths shrinks columns so the bordered table fits termW.
@@ -440,29 +516,48 @@ func formatTimeShort(t time.Time) string {
 }
 
 func padRight(s string, width int) string {
-	r := []rune(s)
 	if width <= 0 {
 		return ""
 	}
-	if len(r) > width {
-		if width == 1 {
-			return "…"
-		}
-		return string(r[:width-1]) + "…"
+	dw := displayWidth(s)
+	if dw > width {
+		return truncateDisplay(s, width)
 	}
-	return s + strings.Repeat(" ", width-len(r))
+	return s + strings.Repeat(" ", width-dw)
 }
 
 func padLeft(s string, width int) string {
-	r := []rune(s)
 	if width <= 0 {
 		return ""
 	}
-	if len(r) > width {
-		if width == 1 {
-			return "…"
-		}
-		return string(r[:width-1]) + "…"
+	dw := displayWidth(s)
+	if dw > width {
+		return truncateDisplay(s, width)
 	}
-	return strings.Repeat(" ", width-len(r)) + s
+	return strings.Repeat(" ", width-dw) + s
+}
+
+func truncateDisplay(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if width == 1 {
+		return "…"
+	}
+	var b strings.Builder
+	w := 0
+	for _, r := range s {
+		rw := runeWidth(r)
+		if w+rw > width-1 {
+			break
+		}
+		b.WriteRune(r)
+		w += rw
+	}
+	b.WriteRune('…')
+	out := b.String()
+	if dw := displayWidth(out); dw < width {
+		out += strings.Repeat(" ", width-dw)
+	}
+	return out
 }

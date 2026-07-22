@@ -273,6 +273,81 @@ func TestPickFileTyped(t *testing.T) {
 	}
 }
 
+func TestPickChoiceTyped(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	got, _, err := PickChoice(&out, strings.NewReader("2\n"), "Visibility", []string{"public", "private"}, "public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "private" {
+		t.Fatalf("got %q", got)
+	}
+	s := out.String()
+	if !strings.Contains(s, "Visibility (↑↓):") {
+		t.Fatalf("expected single-line hint, got %q", s)
+	}
+}
+
+func TestPickChoiceDefaultEmptyEnter(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	got, extra, err := PickChoice(&out, strings.NewReader("\n"), "Visibility", []string{"public", "private"}, "private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "private" {
+		t.Fatalf("got %q, want default private", got)
+	}
+	if extra != 1 {
+		t.Fatalf("clearExtra = %d, want 1", extra)
+	}
+}
+
+func TestPrintGlyphTable(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	if err := PrintGlyphTable(&out, [][]string{
+		{IconOK, "Visibility", "private"},
+		{IconOK, "Token", "tok"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "FIELD") || !strings.Contains(s, "VALUE") {
+		t.Fatalf("expected headers, got %q", s)
+	}
+	if !strings.Contains(s, IconOK) || !strings.Contains(s, "Visibility") || !strings.Contains(s, "private") {
+		t.Fatalf("got %q", s)
+	}
+	if !strings.Contains(s, "+") || !strings.Contains(s, "|") {
+		t.Fatalf("expected table borders, got %q", s)
+	}
+}
+
+func TestDisplayWidthGlyph(t *testing.T) {
+	t.Parallel()
+	if displayWidth(IconOK) != 1 {
+		t.Fatalf("✓: got %d want 1", displayWidth(IconOK))
+	}
+	if displayWidth(IconKey) != 2 {
+		t.Fatalf("🔑: got %d want 2", displayWidth(IconKey))
+	}
+	if got := padRight(IconOK, 2); displayWidth(got) != 2 || got != IconOK+" " {
+		t.Fatalf("pad ✓ to 2: %q dw=%d", got, displayWidth(got))
+	}
+	if got := padRight(IconKey, 2); displayWidth(got) != 2 || got != IconKey {
+		t.Fatalf("pad 🔑 to 2: %q dw=%d", got, displayWidth(got))
+	}
+	widths := contentWidths([]string{"", "FIELD", "VALUE"}, [][]string{
+		{IconOK, "a", "b"},
+		{IconKey, "c", "d"},
+	})
+	if widths[0] != 2 {
+		t.Fatalf("glyph col width %d, want 2", widths[0])
+	}
+}
+
 func TestDescribeError(t *testing.T) {
 	t.Parallel()
 	title, detail, hint := describeError(&client.Error{Status: 401, Message: "Not signed in"})
