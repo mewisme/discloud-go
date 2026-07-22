@@ -15,13 +15,30 @@ func isTTY(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
+func writerColor(w io.Writer) bool {
+	if f, ok := w.(*os.File); ok {
+		return colorOn(f)
+	}
+	return false
+}
+
+func canRewritePrompt(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && isTTY(f)
+}
+
 // promptIcon writes the yellow "?" prefix used for all interactive prompts.
 func promptIcon(w io.Writer) {
-	on := false
-	if f, ok := w.(*os.File); ok {
-		on = colorOn(f)
+	fmt.Fprintf(w, "%s ", yellow(writerColor(w), "?"))
+}
+
+// finishPrompt rewrites the previous prompt line, swapping "?" for a green check.
+func finishPrompt(w io.Writer, label, value string) {
+	if !canRewritePrompt(w) {
+		return
 	}
-	fmt.Fprintf(w, "%s ", yellow(on, "?"))
+	on := writerColor(w)
+	fmt.Fprintf(w, "\033[1A\r\033[K%s %s%s\n", green(on, iconOK), label, value)
 }
 
 func promptLine(w io.Writer, r io.Reader, label string) (string, error) {
@@ -31,7 +48,9 @@ func promptLine(w io.Writer, r io.Reader, label string) (string, error) {
 	if err != nil && err != io.EOF {
 		return "", err
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+	val := strings.TrimRight(line, "\r\n")
+	finishPrompt(w, label, val)
+	return val, nil
 }
 
 // readPasswordPrompt reads a password from the TTY, echoing "*" per character.
@@ -44,7 +63,12 @@ func readPasswordPrompt(label string) (string, error) {
 		return "", err
 	}
 	defer term.Restore(fd, state)
-	return readPasswordMasked(os.Stdin, os.Stderr)
+	pw, err := readPasswordMasked(os.Stdin, os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	finishPrompt(os.Stderr, label, strings.Repeat("*", len(pw)))
+	return pw, nil
 }
 
 // readPasswordMasked reads byte-by-byte, echoes "*", supports backspace.
@@ -174,18 +198,22 @@ func argOrEmpty(args []string, i int) string {
 
 // confirm asks yes/no; default is No. Empty, EOF, and invalid input return false.
 func confirm(w io.Writer, r io.Reader, prompt string) bool {
-	on := false
-	if f, ok := w.(*os.File); ok {
-		on = colorOn(f)
-	}
+	on := writerColor(w)
+	label := prompt + dim(on, " [y/N]") + " "
 	promptIcon(w)
-	fmt.Fprintf(w, "%s%s ", prompt, dim(on, " [y/N]"))
+	fmt.Fprint(w, label)
 	line, err := bufio.NewReader(r).ReadString('\n')
 	if err != nil {
 		return false
 	}
 	s := strings.TrimSpace(strings.ToLower(line))
-	return s == "y" || s == "yes"
+	ok := s == "y" || s == "yes"
+	answer := "No"
+	if ok {
+		answer = "Yes"
+	}
+	finishPrompt(w, label, answer)
+	return ok
 }
 
 // pickIndex prints a numbered list to w and returns the chosen 0-based index.
@@ -196,8 +224,9 @@ func pickIndex(w io.Writer, r io.Reader, labels []string) (int, error) {
 	for i, label := range labels {
 		fmt.Fprintf(w, "  %d) %s\n", i+1, label)
 	}
+	label := fmt.Sprintf("Select (1-%d): ", len(labels))
 	promptIcon(w)
-	fmt.Fprintf(w, "Select (1-%d): ", len(labels))
+	fmt.Fprint(w, label)
 	line, err := bufio.NewReader(r).ReadString('\n')
 	if err != nil {
 		return -1, fmt.Errorf("selection cancelled")
@@ -207,5 +236,6 @@ func pickIndex(w io.Writer, r io.Reader, labels []string) (int, error) {
 	if err != nil || n < 1 || n > len(labels) {
 		return -1, fmt.Errorf("invalid selection")
 	}
+	finishPrompt(w, label, strconv.Itoa(n))
 	return n - 1, nil
 }

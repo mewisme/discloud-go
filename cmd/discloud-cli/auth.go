@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -169,17 +170,54 @@ func newAuthMeCmd() *cobra.Command {
 			if flagJSON {
 				return writeJSON(me)
 			}
-			on := colorOn(os.Stdout)
-			fmt.Printf("%s %s\n", dim(on, "id:"), cyan(on, me.ID))
-			fmt.Printf("%s %s\n", dim(on, "username:"), bold(on, me.Username))
-			if me.Role != "" {
-				fmt.Printf("%s %s\n", dim(on, "role:"), me.Role)
-			}
-			if me.Preferences.DefaultVisibility != "" {
-				fmt.Printf("%s %s\n", dim(on, "default:"), visibilityLabel(on, me.Preferences.DefaultVisibility))
-			}
+			printMe(me)
 			return nil
 		}),
+	}
+}
+
+func printMe(me MeResponse) {
+	on := colorOn(os.Stdout)
+	title := me.Username
+	if me.Role != "" {
+		title = fmt.Sprintf("%s (%s)", me.Username, me.Role)
+	}
+
+	fmt.Printf("%s\n", bold(on, "Profile"))
+	fmt.Printf("  %s\n", bold(on, title))
+	fmt.Printf("%s %s\n", dim(on, "  id:"), cyan(on, me.ID))
+	if !me.CreatedAt.IsZero() {
+		fmt.Printf("%s %s\n", dim(on, "  created:"), dim(on, formatTime(me.CreatedAt)))
+	}
+	if me.Preferences.DefaultVisibility != "" {
+		fmt.Printf("%s %s\n", dim(on, "  default:"), visibilityLabel(on, me.Preferences.DefaultVisibility))
+	}
+
+	fmt.Println()
+	fmt.Printf("%s\n", bold(on, "Stats"))
+	fmt.Printf("%s %s\n", dim(on, "  files:"), fmt.Sprintf("%d  (%d public · %d private)",
+		me.Stats.FileCount, me.Stats.PublicCount, me.Stats.PrivateCount))
+	fmt.Printf("%s %s\n", dim(on, "  storage:"), cyan(on, client.FormatBytes(me.Stats.TotalBytes)))
+	if me.Stats.ExpiringSoonCount > 0 {
+		fmt.Printf("%s %s\n", dim(on, "  expiring:"), yellow(on, fmt.Sprintf("%d soon", me.Stats.ExpiringSoonCount)))
+	}
+
+	fmt.Println()
+	fmt.Printf("%s\n", bold(on, "Session"))
+	if !me.Session.CreatedAt.IsZero() {
+		fmt.Printf("%s %s\n", dim(on, "  since:"), dim(on, formatTime(me.Session.CreatedAt)))
+	}
+	if !me.Session.LastSeenAt.IsZero() {
+		fmt.Printf("%s %s\n", dim(on, "  last seen:"), dim(on, formatTime(me.Session.LastSeenAt)))
+	}
+	if !me.Session.ExpiresAt.IsZero() {
+		fmt.Printf("%s %s\n", dim(on, "  expires:"), dim(on, formatTime(me.Session.ExpiresAt)))
+	}
+	if me.Session.IP != "" {
+		fmt.Printf("%s %s\n", dim(on, "  ip:"), me.Session.IP)
+	}
+	if me.Session.UserAgent != "" {
+		fmt.Printf("%s %s\n", dim(on, "  ua:"), dim(on, me.Session.UserAgent))
 	}
 }
 
