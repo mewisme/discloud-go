@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/mewisme/discloud-go/internal/auth"
@@ -13,7 +12,7 @@ import (
 )
 
 type authBody struct {
-	Email    string `json:"email"`
+	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
@@ -27,9 +26,9 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	email := auth.NormalizeEmail(body.Email)
-	if email == "" || !strings.Contains(email, "@") {
-		writeJSONError(w, http.StatusBadRequest, "Invalid email")
+	username := auth.NormalizeUsername(body.Username)
+	if !auth.ValidUsername(username) {
+		writeJSONError(w, http.StatusBadRequest, "Invalid username")
 		return
 	}
 	if len(body.Password) < auth.MinPasswordLen {
@@ -43,9 +42,9 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := newID()
-	u, err := s.store.CreateUser(r.Context(), id, email, hash)
+	u, err := s.store.CreateUser(r.Context(), id, username, hash)
 	if errors.Is(err, store.ErrConflict) {
-		writeJSONError(w, http.StatusConflict, "Email already registered")
+		writeJSONError(w, http.StatusConflict, "Username already registered")
 		return
 	}
 	if err != nil {
@@ -72,11 +71,11 @@ func (s *Server) handleSignin(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	email := auth.NormalizeEmail(body.Email)
-	u, err := s.store.GetUserByEmail(r.Context(), email)
+	username := auth.NormalizeUsername(body.Username)
+	u, err := s.store.GetUserByUsername(r.Context(), username)
 	if err != nil || !auth.VerifyPassword(u.PasswordHash, body.Password) {
-		s.log.Info("signin failed", "email", email)
-		writeJSONError(w, http.StatusUnauthorized, "Invalid email or password")
+		s.log.Info("signin failed", "username", username)
+		writeJSONError(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 	if err := s.issueSession(w, r, u); err != nil {
@@ -105,19 +104,102 @@ func (s *Server) handleSignout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.sessionUser(r)
-	if !ok {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil || c.Value == "" {
 		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
 		return
 	}
-	writeJSON(w, http.StatusOK, userDTO(u))
+	now := s.now().UTC()
+	tokenHash := s.keys.HashSessionToken(c.Value)
+	u, err := s.store.GetUserBySessionHash(r.Context(), tokenHash, now)
+	if err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
+		return
+	}
+	ip := clientIP(r)
+	ua := r.Header.Get("User-Agent")
+	_ = s.store.TouchSession(r.Context(), tokenHash, ip, ua, now)
+	sess, err := s.store.GetSessionByTokenHash(r.Context(), tokenHash, now)
+	if err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
+		return
+	}
+	stats, err := s.store.OwnerFileStats(r.Context(), u.ID, now, 7*24*time.Hour)
+	if err != nil {
+		s.log.Error("owner stats failed", "user", u.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":                u.ID,
+		"username":          u.Username,
+		"role":              u.Role,
+		"createdAt":         u.CreatedAt,
+		"passwordChangedAt": u.PasswordChangedAt,
+		"stats": map[string]any{
+			"fileCount":         stats.FileCount,
+			"totalBytes":        stats.TotalBytes,
+			"publicCount":       stats.PublicCount,
+			"privateCount":      stats.PrivateCount,
+			"expiringSoonCount": stats.ExpiringSoonCount,
+		},
+		"session": map[string]any{
+			"createdAt":  sess.CreatedAt,
+			"lastSeenAt": sess.LastSeenAt,
+			"expiresAt":  sess.ExpiresAt,
+			"ip":         sess.IP,
+			"userAgent":  sess.UserAgent,
+		},
+		"retention": map[string]any{
+			"authenticatedDays":     int(authenticatedRetention / (24 * time.Hour)),
+			"anonymousDays":         int(anonymousRetention / (24 * time.Hour)),
+			"downloadExtensionDays": int(downloadExtension / (24 * time.Hour)),
+			"maxRetentionDays":      int(maxRetentionFromNow / (24 * time.Hour)),
+		},
+	})
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if !auth.VerifyPassword(u.PasswordHash, body.CurrentPassword) {
+		writeJSONError(w, http.StatusUnauthorized, "Current password is incorrect")
+		return
+	}
+	if len(body.NewPassword) < auth.MinPasswordLen {
+		writeJSONError(w, http.StatusBadRequest, "Password must be at least 8 characters")
+		return
+	}
+	hash, err := auth.HashPassword(body.NewPassword)
+	if err != nil {
+		s.log.Error("hash password failed", "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if err := s.store.UpdatePasswordHash(r.Context(), u.ID, hash); err != nil {
+		s.log.Error("update password failed", "user", u.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	s.log.Info("password_changed", "user", u.ID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func userDTO(u store.User) map[string]any {
 	return map[string]any{
-		"id":    u.ID,
-		"email": u.Email,
-		"role":  u.Role,
+		"id":       u.ID,
+		"username": u.Username,
+		"role":     u.Role,
 	}
 }
 
@@ -127,12 +209,17 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, u store.Us
 		return err
 	}
 	now := s.now().UTC()
+	ua := r.Header.Get("User-Agent")
+	ip := clientIP(r)
 	sess := store.Session{
-		ID:        newID(),
-		UserID:    u.ID,
-		TokenHash: s.keys.HashSessionToken(raw),
-		ExpiresAt: now.Add(sessionTTL),
-		CreatedAt: now,
+		ID:         newID(),
+		UserID:     u.ID,
+		TokenHash:  s.keys.HashSessionToken(raw),
+		ExpiresAt:  now.Add(sessionTTL),
+		CreatedAt:  now,
+		UserAgent:  ua,
+		IP:         ip,
+		LastSeenAt: now,
 	}
 	if err := s.store.CreateSession(r.Context(), sess); err != nil {
 		return err

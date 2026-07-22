@@ -2,17 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useSyncExternalStore } from "react";
-import { toast } from "sonner";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { buttonVariants } from "@/components/ui/button";
 import {
   ensureAuth,
   getAuthServerSnapshot,
   getAuthSnapshot,
-  signOutAndClear,
   subscribeAuth,
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+
+export function userInitial(username: string): string {
+  const ch = username.trim().charAt(0);
+  return ch ? ch.toUpperCase() : "?";
+}
 
 export function AuthHeader() {
   const user = useSyncExternalStore(
@@ -26,21 +30,24 @@ export function AuthHeader() {
   }, []);
 
   if (user === undefined) {
-    return <div className="h-8 w-24 animate-pulse rounded-md bg-muted" aria-hidden />;
+    return <div className="size-8 animate-pulse rounded-full bg-muted" aria-hidden />;
   }
 
   if (!user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1">
         <Link
           href="/signin"
-          className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+          className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "px-2 sm:px-3")}
         >
           Sign in
         </Link>
         <Link
           href="/signup"
-          className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+          className={cn(
+            buttonVariants({ variant: "secondary", size: "sm" }),
+            "px-2 sm:px-3",
+          )}
         >
           Sign up
         </Link>
@@ -49,37 +56,15 @@ export function AuthHeader() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <Link
-        href="/files"
-        className={cn(
-          buttonVariants({ variant: "ghost", size: "sm" }),
-          "hidden sm:inline-flex",
-        )}
-      >
-        My files
-      </Link>
-      <span
-        className="max-w-[10rem] truncate text-xs text-muted-foreground"
-        title={user.email}
-      >
-        {user.email}
-      </span>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={async () => {
-          try {
-            await signOutAndClear();
-            toast.success("Signed out");
-          } catch {
-            toast.error("Could not sign out");
-          }
-        }}
-      >
-        Sign out
-      </Button>
-    </div>
+    <Link
+      href="/me"
+      title={user.username}
+      aria-label={`Account for ${user.username}`}
+      className="shrink-0 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      <Avatar size="sm">
+        <AvatarFallback>{userInitial(user.username)}</AvatarFallback>
+      </Avatar>
+    </Link>
   );
 }

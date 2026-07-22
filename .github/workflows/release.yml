@@ -36,6 +36,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # skip_upload: attach package manifests for scoop/homebrew sync.
+      - name: Attach package manifests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test -f dist/scoop/discloud-cli.json
+          test -f dist/homebrew/Casks/discloud-cli.rb
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/scoop/discloud-cli.json \
+            dist/homebrew/Casks/discloud-cli.rb \
+            --clobber
+
+      # Cross-repo: needs PAT with contents:write on homebrew-mew + scoop-mew.
+      - name: Trigger package manager sync
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGE_SYNC_TOKEN }}
+        run: |
+          payload=$(jq -n \
+            --arg name "discloud-cli" \
+            --arg tag "${GITHUB_REF_NAME}" \
+            '{event_type:"sync-package",client_payload:{name:$name,tag:$tag}}')
+          for repo in homebrew-mew scoop-mew; do
+            echo "$payload" | gh api "repos/${{ github.repository_owner }}/${repo}/dispatches" --input -
+            echo "Dispatched sync-package to ${{ github.repository_owner }}/${repo} (${GITHUB_REF_NAME})"
+          done
+
   # Native per-arch builds (no QEMU). Digests are merged into one multi-arch image.
   frontend-image:
     strategy:

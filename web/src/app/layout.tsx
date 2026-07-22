@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Cloud } from "lucide-react";
@@ -12,11 +12,14 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
+const geistSans = Geist({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
   subsets: ["latin"],
+  variable: "--font-geist-mono",
 });
 
 export const metadata: Metadata = {
@@ -41,7 +44,11 @@ export default async function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("h-full", "antialiased", geistMono.variable, "font-sans", inter.variable)}
+      className={cn(
+        "h-full antialiased font-sans",
+        geistSans.variable,
+        geistMono.variable,
+      )}
     >
       <head>
         <script
@@ -54,15 +61,15 @@ export default async function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <HealthBanner />
           <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur">
-            <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-6 px-4">
+            <div className="mx-auto flex h-14 w-full max-w-4xl items-center gap-3 px-4">
               <Link
                 href="/"
-                className="flex items-center gap-2 font-semibold tracking-tight"
+                className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
               >
                 <Cloud className="size-5 text-primary" aria-hidden />
                 DisCloud
               </Link>
-              <nav className="flex items-center gap-4 text-sm text-muted-foreground">
+              <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
                 <Link href="/" className="transition-colors hover:text-foreground">
                   Upload
                 </Link>
@@ -73,11 +80,22 @@ export default async function RootLayout({
                   API
                 </Link>
               </nav>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
                 <AuthHeader />
                 <ThemeToggle />
               </div>
             </div>
+            <nav className="flex items-center gap-4 border-t border-border/60 px-4 py-2 text-sm text-muted-foreground sm:hidden">
+              <Link href="/" className="transition-colors hover:text-foreground">
+                Upload
+              </Link>
+              <Link href="/files" className="transition-colors hover:text-foreground">
+                Files
+              </Link>
+              <Link href="/docs" className="transition-colors hover:text-foreground">
+                API
+              </Link>
+            </nav>
           </header>
           <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10">
             {children}

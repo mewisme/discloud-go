@@ -13,6 +13,7 @@ lint:
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o dist/discloud ./cmd/discloud
+	CGO_ENABLED=0 go build -trimpath -o dist/discloud-cli ./cmd/discloud-cli
 
 web-dev:
 	cd web && pnpm run dev

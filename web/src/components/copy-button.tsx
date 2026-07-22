@@ -22,7 +22,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
 
   return (
     <Button variant="outline" size="icon-sm" aria-label={label} onClick={copy}>
-      {copied ? <Check className="text-emerald-500" aria-hidden /> : <Copy aria-hidden />}
+      {copied ? <Check className="text-geist-green" aria-hidden /> : <Copy aria-hidden />}
     </Button>
   );
 }

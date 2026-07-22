@@ -22,33 +22,46 @@ const (
 	VisibilityPrivate = "private"
 )
 
-// ErrConflict is returned for unique constraint violations (e.g. email).
+// ErrConflict is returned for unique constraint violations (e.g. username).
 var ErrConflict = errors.New("conflict")
 
 // User is an account row.
 type User struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID                string    `json:"id"`
+	Username          string    `json:"username"`
+	PasswordHash      string    `json:"-"`
+	Role              string    `json:"role"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	PasswordChangedAt time.Time `json:"passwordChangedAt"`
 }
 
 // Session is a login session; TokenHash is never JSON-encoded by callers.
 type Session struct {
-	ID        string
-	UserID    string
-	TokenHash string
-	ExpiresAt time.Time
-	CreatedAt time.Time
+	ID         string
+	UserID     string
+	TokenHash  string
+	ExpiresAt  time.Time
+	CreatedAt  time.Time
+	UserAgent  string
+	IP         string
+	LastSeenAt time.Time
+}
+
+// OwnerStats is aggregate file metadata for an account dashboard.
+type OwnerStats struct {
+	FileCount         int64
+	TotalBytes        int64
+	PublicCount       int64
+	PrivateCount      int64
+	ExpiringSoonCount int64
 }
 
 // createUserLock is a fixed advisory lock key for first-user = admin.
 const createUserLock int64 = 0x646973636C6F7564 // "discloud" truncated
 
 // CreateUser inserts a user. The first user in the DB becomes admin (advisory lock).
-func (s *Store) CreateUser(ctx context.Context, id, email, passwordHash string) (User, error) {
+func (s *Store) CreateUser(ctx context.Context, id, username, passwordHash string) (User, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return User{}, err
@@ -69,8 +82,9 @@ func (s *Store) CreateUser(ctx context.Context, id, email, passwordHash string) 
 	}
 	now := time.Now().UTC()
 	_, err = tx.Exec(ctx,
-		`INSERT INTO users (id, email, password_hash, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`,
-		id, email, passwordHash, role, now, now)
+		`INSERT INTO users (id, username, password_hash, role, created_at, updated_at, password_changed_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		id, username, passwordHash, role, now, now, now)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return User{}, ErrConflict
@@ -80,14 +94,18 @@ func (s *Store) CreateUser(ctx context.Context, id, email, passwordHash string) 
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, err
 	}
-	return User{ID: id, Email: email, PasswordHash: passwordHash, Role: role, CreatedAt: now, UpdatedAt: now}, nil
+	return User{
+		ID: id, Username: username, PasswordHash: passwordHash, Role: role,
+		CreatedAt: now, UpdatedAt: now, PasswordChangedAt: now,
+	}, nil
 }
 
-func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, role, created_at, updated_at FROM users WHERE email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+		`SELECT id, username, password_hash, role, created_at, updated_at, password_changed_at
+		 FROM users WHERE username = $1`, username).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -97,8 +115,9 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, email, password_hash, role, created_at, updated_at FROM users WHERE id = $1`, id).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+		`SELECT id, username, password_hash, role, created_at, updated_at, password_changed_at
+		 FROM users WHERE id = $1`, id).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -106,9 +125,15 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
 }
 
 func (s *Store) CreateSession(ctx context.Context, sess Session) error {
+	lastSeen := sess.LastSeenAt
+	if lastSeen.IsZero() {
+		lastSeen = sess.CreatedAt
+	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)`,
-		sess.ID, sess.UserID, sess.TokenHash, sess.ExpiresAt, sess.CreatedAt)
+		`INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at, user_agent, ip, last_seen_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		sess.ID, sess.UserID, sess.TokenHash, sess.ExpiresAt, sess.CreatedAt,
+		sess.UserAgent, sess.IP, lastSeen)
 	return err
 }
 
@@ -116,20 +141,82 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash string, now time.Time) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.email, u.password_hash, u.role, u.created_at, u.updated_at
+		SELECT u.id, u.username, u.password_hash, u.role, u.created_at, u.updated_at, u.password_changed_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > $2`, tokenHash, now).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
 	return u, err
 }
 
+// GetSessionByTokenHash returns a still-valid session by token hash.
+func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string, now time.Time) (Session, error) {
+	var sess Session
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, user_id, token_hash, expires_at, created_at, user_agent, ip, last_seen_at
+		FROM sessions
+		WHERE token_hash = $1 AND expires_at > $2`, tokenHash, now).
+		Scan(&sess.ID, &sess.UserID, &sess.TokenHash, &sess.ExpiresAt, &sess.CreatedAt,
+			&sess.UserAgent, &sess.IP, &sess.LastSeenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, ErrNotFound
+	}
+	return sess, err
+}
+
+// TouchSession updates last_seen_at, ip, and user_agent for an active session.
+func (s *Store) TouchSession(ctx context.Context, tokenHash, ip, userAgent string, now time.Time) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE sessions SET last_seen_at = $2, ip = $3, user_agent = $4
+		WHERE token_hash = $1 AND expires_at > $2`,
+		tokenHash, now, ip, userAgent)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
 	return err
+}
+
+// UpdatePasswordHash sets a new Argon2id hash and bumps updated_at / password_changed_at.
+func (s *Store) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
+	now := time.Now().UTC()
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE users SET password_hash = $2, updated_at = $3, password_changed_at = $3 WHERE id = $1`,
+		userID, passwordHash, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// OwnerFileStats returns aggregate file stats for an owner.
+func (s *Store) OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (OwnerStats, error) {
+	soon := now.Add(soonWithin)
+	var st OwnerStats
+	err := s.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*)::bigint,
+			COALESCE(SUM(size), 0)::bigint,
+			COUNT(*) FILTER (WHERE visibility = 'public')::bigint,
+			COUNT(*) FILTER (WHERE visibility = 'private')::bigint,
+			COUNT(*) FILTER (WHERE expires_at > $2 AND expires_at <= $3)::bigint
+		FROM files
+		WHERE owner_user_id = $1`, ownerID, now, soon).
+		Scan(&st.FileCount, &st.TotalBytes, &st.PublicCount, &st.PrivateCount, &st.ExpiringSoonCount)
+	return st, err
 }
 
 func isUniqueViolation(err error) bool {

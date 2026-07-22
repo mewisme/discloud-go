@@ -23,7 +23,7 @@ export function HealthBanner() {
   return (
     <div
       role="status"
-      className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-700 dark:text-amber-400"
+      className="flex items-center gap-2 border-b border-geist-amber/30 bg-geist-amber-soft px-4 py-2 text-sm text-geist-amber"
     >
       <TriangleAlert className="size-4 shrink-0" aria-hidden />
       Service degraded: the storage backend is currently unreachable. Uploads and downloads may fail.

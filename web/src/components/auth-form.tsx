@@ -19,7 +19,7 @@ import { setAuthUser } from "@/lib/auth";
 
 export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -34,8 +34,8 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
     setBusy(true);
     try {
       const user = isSignUp
-        ? await signUp(email, password)
-        : await signIn(email, password);
+        ? await signUp(username, password)
+        : await signIn(username, password);
       setAuthUser(user);
       toast.success(isSignUp ? "Account created" : "Signed in");
       router.push("/files");
@@ -59,22 +59,25 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
         <CardTitle>{isSignUp ? "Create account" : "Sign in"}</CardTitle>
         <CardDescription>
           {isSignUp
-            ? "Email and password. First account on the server becomes admin."
-            : "Use the email and password you signed up with."}
+            ? "Username and password. First account on the server becomes admin."
+            : "Use the username and password you signed up with."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={onSubmit}>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">
-              Email
+              Username
             </span>
             <Input
-              type="email"
-              autoComplete="email"
+              type="text"
+              autoComplete="username"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              minLength={3}
+              maxLength={32}
+              pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               disabled={busy}
             />
           </label>

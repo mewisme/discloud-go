@@ -39,6 +39,8 @@ services:
     environment:
       # Browser-facing API origin (not the Docker-internal hostname).
       API_URL: ${API_URL:-http://localhost:8080}
+      # Server-side proxy for /install.sh|/install.ps1 (compose network).
+      API_UPSTREAM: http://api:8080
       NODE_OPTIONS: --max-old-space-size=192
     ports:
       - "3000:3000"

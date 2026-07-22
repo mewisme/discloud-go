@@ -114,10 +114,10 @@ func decodeJSON[T any](t *testing.T, resp *http.Response) T {
 	return v
 }
 
-func (e *authEnv) signup(t *testing.T, email, password string) (cookie string, user map[string]any) {
+func (e *authEnv) signup(t *testing.T, username, password string) (cookie string, user map[string]any) {
 	t.Helper()
 	resp := e.doJSON(t, http.MethodPost, "/api/auth/signup", "", map[string]string{
-		"email": email, "password": password,
+		"username": username, "password": password,
 	})
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -158,12 +158,12 @@ func (e *authEnv) upload(t *testing.T, cookie, name, data string) map[string]any
 
 func TestAuthSignupFirstAdminAndSession(t *testing.T) {
 	e := newAuthEnv(t)
-	c1, u1 := e.signup(t, "Admin@Example.com", "password1")
+	c1, u1 := e.signup(t, "  Admin_User  ", "password1")
 	if u1["role"] != store.RoleAdmin {
 		t.Fatalf("first user role = %v, want admin", u1["role"])
 	}
-	if u1["email"] != "admin@example.com" {
-		t.Fatalf("email not normalized: %v", u1["email"])
+	if u1["username"] != "admin_user" {
+		t.Fatalf("username not normalized: %v", u1["username"])
 	}
 
 	me := e.do(t, http.MethodGet, "/api/auth/me", c1, "", "")
@@ -172,13 +172,21 @@ func TestAuthSignupFirstAdminAndSession(t *testing.T) {
 		t.Fatalf("me = %+v", got)
 	}
 
-	c2, u2 := e.signup(t, "user@example.com", "password2")
+	c2, u2 := e.signup(t, "user2", "password2")
 	if u2["role"] != store.RoleUser {
 		t.Fatalf("second user role = %v, want user", u2["role"])
 	}
 
+	dup := e.doJSON(t, http.MethodPost, "/api/auth/signup", "", map[string]string{
+		"username": "USER2", "password": "password3",
+	})
+	if dup.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate username = %d, want 409", dup.StatusCode)
+	}
+	dup.Body.Close()
+
 	bad := e.doJSON(t, http.MethodPost, "/api/auth/signin", "", map[string]string{
-		"email": "user@example.com", "password": "wrong-password",
+		"username": "user2", "password": "wrong-password",
 	})
 	if bad.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("bad signin = %d", bad.StatusCode)
@@ -186,7 +194,7 @@ func TestAuthSignupFirstAdminAndSession(t *testing.T) {
 	bad.Body.Close()
 
 	ok := e.doJSON(t, http.MethodPost, "/api/auth/signin", "", map[string]string{
-		"email": "user@example.com", "password": "password2",
+		"username": "user2", "password": "password2",
 	})
 	if ok.StatusCode != http.StatusOK {
 		t.Fatalf("signin = %d", ok.StatusCode)
@@ -210,6 +218,131 @@ func TestAuthSignupFirstAdminAndSession(t *testing.T) {
 	_ = c2b
 }
 
+func TestAuthChangePassword(t *testing.T) {
+	e := newAuthEnv(t)
+	cookie, _ := e.signup(t, "changer", "password1")
+
+	wrong := e.doJSON(t, http.MethodPost, "/api/auth/password", cookie, map[string]string{
+		"currentPassword": "wrong-password", "newPassword": "password2",
+	})
+	if wrong.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong current = %d", wrong.StatusCode)
+	}
+	wrong.Body.Close()
+
+	short := e.doJSON(t, http.MethodPost, "/api/auth/password", cookie, map[string]string{
+		"currentPassword": "password1", "newPassword": "short",
+	})
+	if short.StatusCode != http.StatusBadRequest {
+		t.Fatalf("short new = %d", short.StatusCode)
+	}
+	short.Body.Close()
+
+	before := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
+	beforeBody := decodeJSON[map[string]any](t, before)
+	prevChanged, _ := beforeBody["passwordChangedAt"].(string)
+
+	ok := e.doJSON(t, http.MethodPost, "/api/auth/password", cookie, map[string]string{
+		"currentPassword": "password1", "newPassword": "password2",
+	})
+	if ok.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(ok.Body)
+		ok.Body.Close()
+		t.Fatalf("change password = %d: %s", ok.StatusCode, body)
+	}
+	ok.Body.Close()
+
+	// Current session stays valid.
+	me := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
+	meBody := decodeJSON[map[string]any](t, me)
+	if meBody["passwordChangedAt"] == prevChanged {
+		t.Fatalf("passwordChangedAt not bumped: %v", meBody["passwordChangedAt"])
+	}
+
+	old := e.doJSON(t, http.MethodPost, "/api/auth/signin", "", map[string]string{
+		"username": "changer", "password": "password1",
+	})
+	if old.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old password still works = %d", old.StatusCode)
+	}
+	old.Body.Close()
+
+	neu := e.doJSON(t, http.MethodPost, "/api/auth/signin", "", map[string]string{
+		"username": "changer", "password": "password2",
+	})
+	if neu.StatusCode != http.StatusOK {
+		t.Fatalf("new password signin = %d", neu.StatusCode)
+	}
+	neu.Body.Close()
+}
+
+func TestAccountDashboardMe(t *testing.T) {
+	e := newAuthEnv(t)
+	req, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/auth/signup", strings.NewReader(
+		`{"username":"dashuser","password":"password1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("signup = %d: %s", resp.StatusCode, body)
+	}
+	cookie := cookieFrom(resp)
+	resp.Body.Close()
+	if cookie == "" {
+		t.Fatal("missing cookie")
+	}
+
+	up := e.upload(t, cookie, "a.txt", "hello")
+	fileID := up["fileId"].(string)
+	vis := e.doJSON(t, http.MethodPatch, "/api/files/"+fileID+"/visibility", cookie, map[string]string{
+		"visibility": store.VisibilityPrivate,
+	})
+	if vis.StatusCode != http.StatusOK {
+		t.Fatalf("visibility = %d", vis.StatusCode)
+	}
+	vis.Body.Close()
+	_ = e.upload(t, cookie, "b.txt", "world!!")
+
+	me := e.do(t, http.MethodGet, "/api/auth/me", cookie, "", "")
+	if me.StatusCode != http.StatusOK {
+		t.Fatalf("me = %d", me.StatusCode)
+	}
+	body := decodeJSON[map[string]any](t, me)
+	if body["username"] != "dashuser" {
+		t.Fatalf("username = %v", body["username"])
+	}
+	stats, _ := body["stats"].(map[string]any)
+	if int(stats["fileCount"].(float64)) != 2 {
+		t.Fatalf("fileCount = %v", stats["fileCount"])
+	}
+	if int(stats["privateCount"].(float64)) != 1 || int(stats["publicCount"].(float64)) != 1 {
+		t.Fatalf("visibility counts = %+v", stats)
+	}
+	if int64(stats["totalBytes"].(float64)) != int64(len("hello")+len("world!!")) {
+		t.Fatalf("totalBytes = %v", stats["totalBytes"])
+	}
+	sess, _ := body["session"].(map[string]any)
+	if sess["ip"] == "" || sess["userAgent"] == "" {
+		t.Fatalf("session meta = %+v", sess)
+	}
+	if sess["createdAt"] == nil || sess["lastSeenAt"] == nil || sess["expiresAt"] == nil {
+		t.Fatalf("session times = %+v", sess)
+	}
+	ret, _ := body["retention"].(map[string]any)
+	if int(ret["authenticatedDays"].(float64)) != 30 || int(ret["anonymousDays"].(float64)) != 7 {
+		t.Fatalf("retention = %+v", ret)
+	}
+}
+
 func TestAuthConcurrentFirstAdminMemStore(t *testing.T) {
 	st := &memStore{}
 	const n = 32
@@ -222,7 +355,7 @@ func TestAuthConcurrentFirstAdminMemStore(t *testing.T) {
 			defer wg.Done()
 			results[i], errs[i] = st.CreateUser(context.Background(),
 				fmt.Sprintf("id-%d", i),
-				fmt.Sprintf("u%d@ex.com", i),
+				fmt.Sprintf("u%d", i),
 				"hash")
 		}(i)
 	}
@@ -275,7 +408,7 @@ func TestUploadRetentionOwnership(t *testing.T) {
 		t.Fatalf("anon ownedByCurrentUser = %v", anon["ownedByCurrentUser"])
 	}
 
-	cookie, _ := e.signup(t, "owner@ex.com", "password1")
+	cookie, _ := e.signup(t, "owner", "password1")
 	owned := e.upload(t, cookie, "owned.txt", "hello owner")
 	expOwn := parseTime(t, owned["expiresAt"])
 	wantOwn := fixed.Add(authenticatedRetention)
@@ -289,8 +422,8 @@ func TestUploadRetentionOwnership(t *testing.T) {
 
 func TestPublicPrivateAccessMatrix(t *testing.T) {
 	e := newAuthEnv(t)
-	ownerCookie, _ := e.signup(t, "owner@ex.com", "password1")
-	otherCookie, _ := e.signup(t, "other@ex.com", "password2")
+	ownerCookie, _ := e.signup(t, "owner", "password1")
+	otherCookie, _ := e.signup(t, "other", "password2")
 	up := e.upload(t, ownerCookie, "secret.txt", "top secret")
 	fileID := up["fileId"].(string)
 
@@ -414,8 +547,8 @@ func TestPublicPrivateAccessMatrix(t *testing.T) {
 	anonUp := e.upload(t, "", "anon2.txt", "x")
 	anonID := anonUp["fileId"].(string)
 	// Need a session that can "manage" — admin can, but anonymous owner is nil → 403.
-	adminCookie, _ := e.signup(t, "admin2@ex.com", "password1") // third user = user role
-	// First user is still admin (owner@ex.com)
+	adminCookie, _ := e.signup(t, "admin2", "password1") // third user = user role
+	// First user is still admin (owner)
 	forbid := e.doJSON(t, http.MethodPatch, "/api/files/"+anonID+"/visibility", ownerCookie, map[string]string{
 		"visibility": store.VisibilityPrivate,
 	})
@@ -430,8 +563,8 @@ func TestPublicPrivateAccessMatrix(t *testing.T) {
 
 func TestListAndDeleteNoDiscord(t *testing.T) {
 	e := newAuthEnv(t)
-	c1, _ := e.signup(t, "a@ex.com", "password1")
-	c2, _ := e.signup(t, "b@ex.com", "password2")
+	c1, _ := e.signup(t, "user_a", "password1")
+	c2, _ := e.signup(t, "user_b", "password2")
 	up1 := e.upload(t, c1, "a.txt", "aaa")
 	up2 := e.upload(t, c2, "b.txt", "bbb")
 	id1 := up1["fileId"].(string)
@@ -611,7 +744,7 @@ func TestCleanupExpiredAndCORS(t *testing.T) {
 	}
 
 	// Wrong Origin on mutating + cookie → 403.
-	cookie, _ := e.signup(t, "cors@ex.com", "password1")
+	cookie, _ := e.signup(t, "corsuser", "password1")
 	bad, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/auth/signout", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -662,7 +795,7 @@ func TestCSRFOriginOnMutatingWithoutCookie(t *testing.T) {
 // Signed-in top-level navigation to a public file: cookie present, no Origin.
 func TestPublicPreviewNoOriginWithCookie(t *testing.T) {
 	e := newAuthEnv(t)
-	cookie, _ := e.signup(t, "preview@ex.com", "password1")
+	cookie, _ := e.signup(t, "preview", "password1")
 	up := e.upload(t, cookie, "pub.txt", "hello public")
 	id := up["fileId"].(string)
 

@@ -27,7 +27,8 @@ export type UploadManagerState = {
   queue: QueuedItem[];
   /** Extra pending count published by the owner tab (for peer UIs). */
   remoteQueue: number;
-  lastResult: UploadResult | null;
+  /** Completed uploads this session (newest first). */
+  results: UploadResult[];
 };
 
 type Job = { id: string; file: File };
@@ -43,7 +44,9 @@ type WireState = {
   updatedAt: number;
   uploading: ActiveUpload | null;
   queue: number;
-  lastResult: UploadResult | null;
+  results: UploadResult[];
+  /** @deprecated old single-result wire; still accepted when reading storage. */
+  lastResult?: UploadResult | null;
 };
 
 function normalizeActive(
@@ -62,7 +65,7 @@ function normalizeActive(
 }
 
 let uploading: UploadManagerState["uploading"] = null;
-let lastResult: UploadResult | null = null;
+let results: UploadResult[] = [];
 let remoteQueue = 0;
 let jobs: Job[] = [];
 let running = false;
@@ -78,8 +81,21 @@ let cached: UploadManagerState = {
   canCancel: false,
   queue: [],
   remoteQueue: 0,
-  lastResult: null,
+  results: [],
 };
+
+/** Newest-first upsert; keeps peer/local results without dropping siblings. */
+function upsertResults(incoming: UploadResult[]): void {
+  if (incoming.length === 0) return;
+  const ids = new Set(incoming.map((r) => r.fileId));
+  results = [...incoming, ...results.filter((r) => !ids.has(r.fileId))];
+}
+
+function wireResults(wire: WireState): UploadResult[] {
+  if (Array.isArray(wire.results) && wire.results.length > 0) return wire.results;
+  if (wire.lastResult) return [wire.lastResult];
+  return [];
+}
 const listeners = new Set<Listener>();
 
 function now(): number {
@@ -107,7 +123,7 @@ function snapshot(): UploadManagerState {
     canCancel: running,
     queue: queueView(),
     remoteQueue: ownerId === ensureTabId() ? 0 : remoteQueue,
-    lastResult,
+    results,
   };
   return cached;
 }
@@ -136,14 +152,14 @@ function wirePayload(): WireState {
     updatedAt: now(),
     uploading,
     queue: jobs.length,
-    lastResult,
+    results,
   };
 }
 
 function writeStored(wire: WireState): void {
   if (typeof localStorage === "undefined") return;
   try {
-    if (!wire.uploading && wire.queue === 0 && !wire.lastResult) {
+    if (!wire.uploading && wire.queue === 0 && wire.results.length === 0) {
       localStorage.removeItem(STORAGE_KEY);
     } else {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(wire));
@@ -216,14 +232,14 @@ function applyRemote(wire: WireState): void {
   // Owner tab ignores its own broadcasts.
   if (wire.ownerId === ensureTabId() && running) return;
 
-  const wasDone = lastResult?.fileId;
+  const known = new Set(results.map((r) => r.fileId));
   uploading = normalizeActive(wire.uploading);
   ownerId = wire.ownerId;
   remoteQueue = wire.queue ?? 0;
-  if (wire.lastResult) lastResult = wire.lastResult;
+  upsertResults(wireResults(wire));
   notify();
 
-  if (wire.lastResult && wire.lastResult.fileId !== wasDone) {
+  if (results.some((r) => !known.has(r.fileId))) {
     window.dispatchEvent(new Event("discloud:files"));
   }
 
@@ -261,7 +277,7 @@ function syncFromPeers(): void {
     uploading = normalizeActive(stored.uploading);
     ownerId = stored.ownerId;
     remoteQueue = stored.queue ?? 0;
-    if (stored.lastResult) lastResult = stored.lastResult;
+    upsertResults(wireResults(stored));
   }
   snapshot();
 
@@ -294,7 +310,7 @@ function syncFromPeers(): void {
         updatedAt: now(),
         uploading: null,
         queue: 0,
-        lastResult,
+        results,
       });
       notify();
     }
@@ -378,7 +394,7 @@ async function pump(): Promise<void> {
     const publicResult = withPublicURLs(result);
     rememberLocalFile(publicResult);
     window.dispatchEvent(new Event("discloud:files"));
-    lastResult = publicResult;
+    upsertResults([publicResult]);
     toast.success(`${publicResult.fileName} uploaded`);
   } catch (err: unknown) {
     if (isAbortError(err)) {
@@ -458,10 +474,26 @@ export function cancelUpload(): void {
   abortCtrl?.abort();
 }
 
+export function dismissResult(fileId: string): void {
+  syncFromPeers();
+  const next = results.filter((r) => r.fileId !== fileId);
+  if (next.length !== results.length) {
+    results = next;
+    publish();
+  }
+}
+
+export function dismissAllResults(): void {
+  syncFromPeers();
+  if (results.length === 0) return;
+  results = [];
+  publish();
+}
+
 export function clearDone(): void {
   syncFromPeers();
-  if (lastResult && !uploading && jobs.length === 0) {
-    lastResult = null;
+  if (results.length > 0 && !uploading && jobs.length === 0) {
+    results = [];
     publish();
   }
 }

@@ -17,8 +17,33 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }}
 
+  - id: discloud-cli
+    main: ./cmd/discloud-cli
+    binary: discloud-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
 archives:
-  - formats: [tar.gz]
+  - id: discloud-cli
+    ids: [discloud-cli]
+    formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+    format_overrides:
+      - goos: windows
+        formats: [zip]
 
 checksum:
   name_template: checksums.txt
@@ -43,6 +68,7 @@ changelog:
 dockers_v2:
   - images:
       - ghcr.io/mewisme/discloud
+    ids: [discloud]
     dockerfile: Dockerfile.goreleaser
     # Context is only binaries + Dockerfile; seed /data needs this dir.
     extra_files:
@@ -57,6 +83,40 @@ dockers_v2:
       "org.opencontainers.image.source": "https://github.com/mewisme/discloud-go"
       "org.opencontainers.image.description": "Unlimited cloud storage backed by Discord attachments"
       "org.opencontainers.image.licenses": "MIT"
+
+scoops:
+  - name: discloud-cli
+    ids: [discloud-cli]
+    url_template: "https://github.com/mewisme/discloud-go/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    homepage: "https://github.com/mewisme/discloud-go"
+    description: "CLI client for DisCloud (Discord-backed file storage)"
+    license: MIT
+    skip_upload: true
+    repository:
+      owner: mewisme
+      name: scoop-mew
+      branch: main
+
+homebrew_casks:
+  - name: discloud-cli
+    ids: [discloud-cli]
+    binaries:
+      - discloud-cli
+    homepage: "https://github.com/mewisme/discloud-go"
+    description: "CLI client for DisCloud (Discord-backed file storage)"
+    directory: Casks
+    skip_upload: true
+    hooks:
+      post:
+        install: |
+          FileUtils.ln_sf "#{staged_path}/discloud-cli", "#{staged_path}/discloud"
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/discloud-cli"]
+          end
+    repository:
+      owner: mewisme
+      name: homebrew-mew
+      branch: main
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"

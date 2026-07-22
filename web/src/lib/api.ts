@@ -2,8 +2,36 @@ export type Visibility = "public" | "private";
 
 export type AuthUser = {
   id: string;
-  email: string;
+  username: string;
   role: "admin" | "user";
+};
+
+export type AccountMe = {
+  id: string;
+  username: string;
+  role: "admin" | "user";
+  createdAt: string;
+  passwordChangedAt: string;
+  stats: {
+    fileCount: number;
+    totalBytes: number;
+    publicCount: number;
+    privateCount: number;
+    expiringSoonCount: number;
+  };
+  session: {
+    createdAt: string;
+    lastSeenAt: string;
+    expiresAt: string;
+    ip: string;
+    userAgent: string;
+  };
+  retention: {
+    authenticatedDays: number;
+    anonymousDays: number;
+    downloadExtensionDays: number;
+    maxRetentionDays: number;
+  };
 };
 
 /** Shared file link payload from upload / file APIs. */
@@ -180,25 +208,40 @@ export async function fetchMe(): Promise<AuthUser | null> {
   });
   if (res.status === 401) return null;
   if (!res.ok) throw new ApiError(res.status, await readMessage(res));
-  return (await res.json()) as AuthUser;
+  const body = (await res.json()) as AccountMe;
+  return { id: body.id, username: body.username, role: body.role };
 }
 
-export async function signUp(email: string, password: string): Promise<AuthUser> {
+export async function fetchAccountMe(): Promise<AccountMe> {
+  return apiFetch<AccountMe>("/api/auth/me");
+}
+
+export async function signUp(username: string, password: string): Promise<AuthUser> {
   return apiFetch<AuthUser>("/api/auth/signup", {
     method: "POST",
-    json: { email, password },
+    json: { username, password },
   });
 }
 
-export async function signIn(email: string, password: string): Promise<AuthUser> {
+export async function signIn(username: string, password: string): Promise<AuthUser> {
   return apiFetch<AuthUser>("/api/auth/signin", {
     method: "POST",
-    json: { email, password },
+    json: { username, password },
   });
 }
 
 export async function signOut(): Promise<void> {
   await apiFetch<void>("/api/auth/signout", { method: "POST" });
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await apiFetch<void>("/api/auth/password", {
+    method: "POST",
+    json: { currentPassword, newPassword },
+  });
 }
 
 export async function listMyFiles(opts?: {

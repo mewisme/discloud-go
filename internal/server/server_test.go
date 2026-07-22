@@ -106,7 +106,7 @@ type memStore struct {
 	stats    map[string]*fileStats
 	visitors map[string]map[string]struct{}
 	users    map[string]store.User
-	byEmail  map[string]string        // email -> user id
+	byUser   map[string]string        // username -> user id
 	sessions map[string]store.Session // token hash -> session
 }
 
@@ -264,14 +264,14 @@ func (m *memStore) GetFileInspect(_ context.Context, id string) (store.FileInspe
 	}, nil
 }
 
-func (m *memStore) CreateUser(_ context.Context, id, email, passwordHash string) (store.User, error) {
+func (m *memStore) CreateUser(_ context.Context, id, username, passwordHash string) (store.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.users == nil {
 		m.users = map[string]store.User{}
-		m.byEmail = map[string]string{}
+		m.byUser = map[string]string{}
 	}
-	if _, ok := m.byEmail[email]; ok {
+	if _, ok := m.byUser[username]; ok {
 		return store.User{}, store.ErrConflict
 	}
 	role := store.RoleUser
@@ -279,16 +279,19 @@ func (m *memStore) CreateUser(_ context.Context, id, email, passwordHash string)
 		role = store.RoleAdmin
 	}
 	now := time.Now().UTC()
-	u := store.User{ID: id, Email: email, PasswordHash: passwordHash, Role: role, CreatedAt: now, UpdatedAt: now}
+	u := store.User{
+		ID: id, Username: username, PasswordHash: passwordHash, Role: role,
+		CreatedAt: now, UpdatedAt: now, PasswordChangedAt: now,
+	}
 	m.users[id] = u
-	m.byEmail[email] = id
+	m.byUser[username] = id
 	return u, nil
 }
 
-func (m *memStore) GetUserByEmail(_ context.Context, email string) (store.User, error) {
+func (m *memStore) GetUserByUsername(_ context.Context, username string) (store.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id, ok := m.byEmail[email]
+	id, ok := m.byUser[username]
 	if !ok {
 		return store.User{}, store.ErrNotFound
 	}
@@ -311,6 +314,9 @@ func (m *memStore) CreateSession(_ context.Context, sess store.Session) error {
 	if m.sessions == nil {
 		m.sessions = map[string]store.Session{}
 	}
+	if sess.LastSeenAt.IsZero() {
+		sess.LastSeenAt = sess.CreatedAt
+	}
 	m.sessions[sess.TokenHash] = sess
 	return nil
 }
@@ -329,11 +335,73 @@ func (m *memStore) GetUserBySessionHash(_ context.Context, tokenHash string, now
 	return u, nil
 }
 
+func (m *memStore) GetSessionByTokenHash(_ context.Context, tokenHash string, now time.Time) (store.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.sessions[tokenHash]
+	if !ok || !sess.ExpiresAt.After(now) {
+		return store.Session{}, store.ErrNotFound
+	}
+	return sess, nil
+}
+
+func (m *memStore) TouchSession(_ context.Context, tokenHash, ip, userAgent string, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.sessions[tokenHash]
+	if !ok || !sess.ExpiresAt.After(now) {
+		return store.ErrNotFound
+	}
+	sess.LastSeenAt = now
+	sess.IP = ip
+	sess.UserAgent = userAgent
+	m.sessions[tokenHash] = sess
+	return nil
+}
+
 func (m *memStore) DeleteSession(_ context.Context, tokenHash string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, tokenHash)
 	return nil
+}
+
+func (m *memStore) UpdatePasswordHash(_ context.Context, userID, passwordHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[userID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	u.PasswordHash = passwordHash
+	u.UpdatedAt = now
+	u.PasswordChangedAt = now
+	m.users[userID] = u
+	return nil
+}
+
+func (m *memStore) OwnerFileStats(_ context.Context, ownerID string, now time.Time, soonWithin time.Duration) (store.OwnerStats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	soon := now.Add(soonWithin)
+	var st store.OwnerStats
+	for _, f := range m.files {
+		if f.OwnerUserID == nil || *f.OwnerUserID != ownerID {
+			continue
+		}
+		st.FileCount++
+		st.TotalBytes += f.Size
+		if f.Visibility == store.VisibilityPrivate {
+			st.PrivateCount++
+		} else {
+			st.PublicCount++
+		}
+		if f.ExpiresAt.After(now) && !f.ExpiresAt.After(soon) {
+			st.ExpiringSoonCount++
+		}
+	}
+	return st, nil
 }
 
 func (m *memStore) UpdateVisibility(_ context.Context, id, visibility string, tokenHash *string, rotatedAt *time.Time) error {

@@ -27,12 +27,16 @@ type Store interface {
 	EnsureBots(ctx context.Context, count int) error
 	RecordEvent(ctx context.Context, e store.Event) error
 	GetFileInspect(ctx context.Context, id string) (store.FileInspect, error)
-	CreateUser(ctx context.Context, id, email, passwordHash string) (store.User, error)
-	GetUserByEmail(ctx context.Context, email string) (store.User, error)
+	CreateUser(ctx context.Context, id, username, passwordHash string) (store.User, error)
+	GetUserByUsername(ctx context.Context, username string) (store.User, error)
 	GetUserByID(ctx context.Context, id string) (store.User, error)
 	CreateSession(ctx context.Context, sess store.Session) error
 	GetUserBySessionHash(ctx context.Context, tokenHash string, now time.Time) (store.User, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash string, now time.Time) (store.Session, error)
+	TouchSession(ctx context.Context, tokenHash, ip, userAgent string, now time.Time) error
 	DeleteSession(ctx context.Context, tokenHash string) error
+	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
+	OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (store.OwnerStats, error)
 	UpdateVisibility(ctx context.Context, id, visibility string, tokenHash *string, rotatedAt *time.Time) error
 	RotateAccessToken(ctx context.Context, id, tokenHash string, rotatedAt time.Time) error
 	DeleteFile(ctx context.Context, id string) error
@@ -102,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/signin", s.handleSignin)
 	mux.HandleFunc("POST /api/auth/signout", s.handleSignout)
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
+	mux.HandleFunc("POST /api/auth/password", s.handleChangePassword)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/chunks/{hash}", s.handleChunkCheck)
 	mux.HandleFunc("POST /api/chunks", s.handleChunkUpload)
@@ -120,6 +125,8 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
+	mux.HandleFunc("GET /install.sh", s.handleInstallSH)
+	mux.HandleFunc("GET /install.ps1", s.handleInstallPS1)
 	return s.withLogging(s.withCORSAndCSRF(mux))
 }
 

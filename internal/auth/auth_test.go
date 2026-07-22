@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestHashVerifyPassword(t *testing.T) {
 	hash, err := HashPassword("secret-password")
@@ -12,6 +15,27 @@ func TestHashVerifyPassword(t *testing.T) {
 	}
 	if VerifyPassword(hash, "wrong") {
 		t.Fatal("wrong password should not verify")
+	}
+}
+
+func TestValidUsername(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"ab", false},
+		{"abc", true},
+		{"user_name-1", true},
+		{"_bad", false},
+		{"-bad", false},
+		{"Bad", false}, // not normalized
+		{NormalizeUsername("  Alice_1  "), true},
+		{strings.Repeat("a", 33), false},
+	}
+	for _, tc := range cases {
+		if got := ValidUsername(tc.in); got != tc.want {
+			t.Errorf("ValidUsername(%q)=%v want %v", tc.in, got, tc.want)
+		}
 	}
 }
 

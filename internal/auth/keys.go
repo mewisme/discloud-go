@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -70,7 +71,15 @@ func GenerateOpaqueToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// NormalizeEmail lowercases and trims email.
-func NormalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// NormalizeUsername lowercases and trims a username.
+func NormalizeUsername(username string) string {
+	return strings.ToLower(strings.TrimSpace(username))
+}
+
+// ValidUsername reports whether username matches signup rules (already normalized).
+func ValidUsername(username string) bool {
+	n := len(username)
+	return n >= 3 && n <= 32 && usernamePattern.MatchString(username)
 }
