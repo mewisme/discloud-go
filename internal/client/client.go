@@ -25,11 +25,17 @@ type Config struct {
 	CookiePath string // cookie jar file; empty → default path
 }
 
-// DefaultConfig reads env, then ~/.config/discloud/config.json, then localhost defaults.
+// DefaultConfig resolves settings in order:
+// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN) → nearest .env
+// (DISCLOUD_* or API_URL / WEB_ORIGIN) → ~/.config/discloud/config.json → localhost defaults.
+// CLI flags (--base / --origin) override after this when set by the caller.
 func DefaultConfig() Config {
+	envBase := os.Getenv("DISCLOUD_BASE")
+	envOrigin := os.Getenv("DISCLOUD_ORIGIN")
+	dotBase, dotOrigin := loadDotEnvValues()
 	fileBase, fileOrigin := loadConfigFile()
-	base := firstNonEmpty(os.Getenv("DISCLOUD_BASE"), fileBase, "http://localhost:8080")
-	origin := firstNonEmpty(os.Getenv("DISCLOUD_ORIGIN"), fileOrigin, "http://localhost:3000")
+	base := firstNonEmpty(envBase, dotBase, fileBase, "http://localhost:8080")
+	origin := firstNonEmpty(envOrigin, dotOrigin, fileOrigin, "http://localhost:3000")
 	return Config{
 		BaseURL:    strings.TrimRight(base, "/"),
 		Origin:     strings.TrimRight(origin, "/"),
@@ -65,20 +71,53 @@ func defaultCookiePath() string {
 	return filepath.Join(defaultConfigDir(), "cookies")
 }
 
+// ConfigFilePath is the user config.json path (may not exist yet).
+func ConfigFilePath() string {
+	return filepath.Join(defaultConfigDir(), "config.json")
+}
+
+type configFile struct {
+	Base   string `json:"base"`
+	Origin string `json:"origin"`
+}
+
 func loadConfigFile() (base, origin string) {
-	path := filepath.Join(defaultConfigDir(), "config.json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(ConfigFilePath())
 	if err != nil {
 		return "", ""
 	}
-	var f struct {
-		Base   string `json:"base"`
-		Origin string `json:"origin"`
-	}
+	var f configFile
 	if json.Unmarshal(data, &f) != nil {
 		return "", ""
 	}
 	return f.Base, f.Origin
+}
+
+// SaveConfigFile merges non-empty base/origin into config.json and writes it.
+// Empty fields keep the previous file values (or stay empty).
+// Returns the path and the values that were written.
+func SaveConfigFile(base, origin string) (path, savedBase, savedOrigin string, err error) {
+	path = ConfigFilePath()
+	curBase, curOrigin := loadConfigFile()
+	f := configFile{
+		Base:   firstNonEmpty(strings.TrimRight(strings.TrimSpace(base), "/"), curBase),
+		Origin: firstNonEmpty(strings.TrimRight(strings.TrimSpace(origin), "/"), curOrigin),
+	}
+	if f.Base == "" && f.Origin == "" {
+		return "", "", "", fmt.Errorf("nothing to write: pass --base and/or --origin")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", "", "", err
+	}
+	data, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return "", "", "", err
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", "", "", err
+	}
+	return path, f.Base, f.Origin, nil
 }
 
 // Error is an API error with HTTP status and message body.
