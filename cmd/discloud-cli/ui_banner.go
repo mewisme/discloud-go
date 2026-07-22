@@ -1,0 +1,36 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+const cliBanner = `
+██████╗ ██╗███████╗ ██████╗██╗      ██████╗ ██╗   ██╗██████╗ 
+██╔══██╗██║██╔════╝██╔════╝██║     ██╔═══██╗██║   ██║██╔══██╗
+██║  ██║██║███████╗██║     ██║     ██║   ██║██║   ██║██║  ██║
+██║  ██║██║╚════██║██║     ██║     ██║   ██║██║   ██║██║  ██║
+██████╔╝██║███████║╚██████╗███████╗╚██████╔╝╚██████╔╝██████╔╝
+╚═════╝ ╚═╝╚══════╝ ╚═════╝╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ 
+
+`
+
+// printCLIHeader prints the DISCLOUD banner before human command output.
+// Skipped for --json and cobra completion (keeps stdout/machine output clean).
+func printCLIHeader(cmd *cobra.Command) {
+	if flagJSON {
+		return
+	}
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == "completion" {
+			return
+		}
+	}
+	text := cliBanner
+	if colorOn(os.Stderr) {
+		text = dim(true, text)
+	}
+	fmt.Fprint(os.Stderr, text)
+}

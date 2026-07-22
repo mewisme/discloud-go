@@ -157,18 +157,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ready"))
 }
 
-// handleInfo is a tiny public config the web client uses to size upload
-// parallelism (one worker per Discord bot when multiple tokens are set).
+// handleInfo is public upload sizing only — never expose bot/worker counts.
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	bots := s.discord.TokenCount()
-	workers := singleBotUploadConcurrency
-	if bots > 1 {
-		workers = bots
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bots":      bots,
 		"chunkSize": chunkSize,
-		"workers":   workers,
 	})
 }
 

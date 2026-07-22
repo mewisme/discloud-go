@@ -63,6 +63,20 @@ func TestReadPasswordMasked(t *testing.T) {
 	}
 }
 
+func TestResolveArg(t *testing.T) {
+	t.Parallel()
+	got, err := resolveArg("abc", "SHA-256: ")
+	if err != nil || got != "abc" {
+		t.Fatalf("got %q %v", got, err)
+	}
+	flagJSON = true
+	t.Cleanup(func() { flagJSON = false })
+	_, err = resolveArg("", "SHA-256: ")
+	if err == nil || !strings.Contains(err.Error(), "--json") {
+		t.Fatalf("want --json error, got %v", err)
+	}
+}
+
 func TestConfirmDefaultNo(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

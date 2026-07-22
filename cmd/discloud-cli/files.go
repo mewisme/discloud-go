@@ -132,20 +132,30 @@ func newFilesVisibilityCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "visibility [id] {public|private}",
 		Short: "Set file visibility",
-		Args:  cobra.RangeArgs(1, 2),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
 			var id, vis string
-			if len(args) == 1 {
+			switch len(args) {
+			case 0:
+				vis, err = resolveArg("", "Visibility (public|private): ")
+				if err != nil {
+					return err
+				}
+				id, err = resolveFileID(c, "")
+				if err != nil {
+					return err
+				}
+			case 1:
 				vis = args[0]
 				id, err = resolveFileID(c, "")
 				if err != nil {
 					return err
 				}
-			} else {
+			default:
 				id = args[0]
 				vis = args[1]
 			}
@@ -279,13 +289,6 @@ func newFilesDeleteCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
 	return cmd
-}
-
-func argOrEmpty(args []string, i int) string {
-	if i < len(args) {
-		return args[i]
-	}
-	return ""
 }
 
 func currentVisibility(c *client.Client, id string) (string, error) {

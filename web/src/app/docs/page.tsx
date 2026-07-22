@@ -438,11 +438,9 @@ curl -s "$BASE/api/files/<id>?token=<accessToken>"`}</DocsCode>
           </Endpoint>
 
           <Endpoint method="GET" path="/api/info">
-            <p>
-              Public config for clients: bot/worker hint and chunk size.
-            </p>
+            <p>Public upload sizing (chunk size only).</p>
             <DocsCode>{`curl -s "$BASE/api/info"
-# { "bots": 1, "chunkSize": 8388608, "workers": 3 }`}</DocsCode>
+# { "chunkSize": 8388608 }`}</DocsCode>
           </Endpoint>
         </TabsContent>
 

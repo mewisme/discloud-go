@@ -570,39 +570,41 @@ func newTestServerWithTokens(t *testing.T, tokens string) (*httptest.Server, *fa
 	return ts, fake, ca
 }
 
-func TestInfoWorkersScaleWithBots(t *testing.T) {
+func TestInfoReturnsChunkSizeOnly(t *testing.T) {
 	ts1, _, _ := newTestServerWithTokens(t, "tok-a")
 	resp, err := http.Get(ts1.URL + "/api/info")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var one struct {
-		Bots    int `json:"bots"`
-		Workers int `json:"workers"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&one); err != nil {
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if one.Bots != 1 || one.Workers != singleBotUploadConcurrency {
-		t.Fatalf("single bot info = %+v, want bots=1 workers=%d", one, singleBotUploadConcurrency)
+	if _, ok := body["bots"]; ok {
+		t.Fatalf("bots must not be public: %v", body)
+	}
+	if _, ok := body["workers"]; ok {
+		t.Fatalf("workers must not be public: %v", body)
+	}
+	cs, ok := body["chunkSize"].(float64)
+	if !ok || int64(cs) != chunkSize {
+		t.Fatalf("chunkSize = %v, want %d", body["chunkSize"], chunkSize)
 	}
 
+	// Same payload regardless of bot count.
 	ts3, _, _ := newTestServerWithTokens(t, "tok-a,tok-b,tok-c")
 	resp3, err := http.Get(ts3.URL + "/api/info")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp3.Body.Close()
-	var three struct {
-		Bots    int `json:"bots"`
-		Workers int `json:"workers"`
-	}
-	if err := json.NewDecoder(resp3.Body).Decode(&three); err != nil {
+	var body3 map[string]any
+	if err := json.NewDecoder(resp3.Body).Decode(&body3); err != nil {
 		t.Fatal(err)
 	}
-	if three.Bots != 3 || three.Workers != 3 {
-		t.Fatalf("multi bot info = %+v, want bots=3 workers=3", three)
+	if len(body3) != 1 {
+		t.Fatalf("info keys = %v, want only chunkSize", body3)
 	}
 }
 

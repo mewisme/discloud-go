@@ -10,14 +10,12 @@ import (
 	"strconv"
 )
 
-// Info is public upload config from GET /api/info.
+// Info is public upload config from GET /api/info (chunk size only).
 type Info struct {
-	Bots      int   `json:"bots"`
 	ChunkSize int64 `json:"chunkSize"`
-	Workers   int   `json:"workers"`
 }
 
-// GetInfo fetches bot/worker/chunkSize hints.
+// GetInfo fetches public upload sizing (chunkSize).
 func (c *Client) GetInfo() (Info, error) {
 	var out Info
 	err := c.DoJSON(http.MethodGet, "/api/info", nil, &out)

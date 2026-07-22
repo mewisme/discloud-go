@@ -12,10 +12,14 @@ func newUploadCmd() *cobra.Command {
 	var name string
 	var workers int
 	cmd := &cobra.Command{
-		Use:   "upload <path>",
+		Use:   "upload [path]",
 		Short: "Resumable chunked upload",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			path, err := resolveArg(argOrEmpty(args, 0), "Path: ")
+			if err != nil {
+				return err
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
@@ -26,7 +30,7 @@ func newUploadCmd() *cobra.Command {
 				bar = newProgressBar(os.Stderr)
 				progress = bar.Update
 			}
-			raw, err := c.UploadChunked(args[0], client.UploadChunkedOptions{
+			raw, err := c.UploadChunked(path, client.UploadChunkedOptions{
 				FileName: name,
 				Workers:  workers,
 				Progress: progress,
@@ -72,16 +76,20 @@ func printUploadSuccess(item FileItem) {
 func newUploadRawCmd() *cobra.Command {
 	var name string
 	cmd := &cobra.Command{
-		Use:   "upload-raw <path>",
+		Use:   "upload-raw [path]",
 		Short: "Single POST /api/upload",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			path, err := resolveArg(argOrEmpty(args, 0), "Path: ")
+			if err != nil {
+				return err
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
 			raw, err := waitVal("Uploading…", func() (map[string]any, error) {
-				return c.UploadRaw(args[0], name)
+				return c.UploadRaw(path, name)
 			})
 			if err != nil {
 				return err

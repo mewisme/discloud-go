@@ -27,7 +27,7 @@ type ProgressFunc func(sent, total int64)
 // UploadChunkedOptions configures resumable upload.
 type UploadChunkedOptions struct {
 	FileName string
-	Workers  int // 0 → from /api/info
+	Workers  int // 0 → defaultWorkers
 	Progress ProgressFunc
 }
 
@@ -75,16 +75,13 @@ func (c *Client) UploadChunked(path string, opt UploadChunkedOptions) (map[strin
 
 	info, err := c.GetInfo()
 	if err != nil {
-		info = Info{ChunkSize: defaultChunkSize, Workers: defaultWorkers}
+		info = Info{ChunkSize: defaultChunkSize}
 	}
 	chunkSize := info.ChunkSize
 	if chunkSize <= 0 {
 		chunkSize = defaultChunkSize
 	}
 	workers := opt.Workers
-	if workers <= 0 {
-		workers = info.Workers
-	}
 	if workers <= 0 {
 		workers = defaultWorkers
 	}

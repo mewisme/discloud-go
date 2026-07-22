@@ -135,20 +135,41 @@ func resolvePassword(positional string, passwordStdin bool) (string, error) {
 
 // resolveUsername returns username from args or TTY prompt.
 func resolveUsername(arg string) (string, error) {
-	if arg != "" {
-		return arg, nil
+	return resolveArg(arg, "Username: ")
+}
+
+// resolveArg returns arg if set; otherwise prompts on a TTY.
+// Fails under --json or non-TTY when the value is missing.
+func resolveArg(arg, label string) (string, error) {
+	if strings.TrimSpace(arg) != "" {
+		return strings.TrimSpace(arg), nil
+	}
+	name := strings.TrimSpace(strings.TrimSuffix(label, ":"))
+	if name == "" {
+		name = "value"
+	}
+	if flagJSON {
+		return "", fmt.Errorf("%s required with --json", strings.ToLower(name))
 	}
 	if !isTTY(os.Stdin) {
-		return "", fmt.Errorf("username required")
+		return "", fmt.Errorf("%s required", strings.ToLower(name))
 	}
-	u, err := promptLine(os.Stderr, os.Stdin, "Username: ")
+	v, err := promptLine(os.Stderr, os.Stdin, label)
 	if err != nil {
 		return "", err
 	}
-	if u == "" {
-		return "", fmt.Errorf("empty username")
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", fmt.Errorf("empty %s", strings.ToLower(name))
 	}
-	return u, nil
+	return v, nil
+}
+
+func argOrEmpty(args []string, i int) string {
+	if i < 0 || i >= len(args) {
+		return ""
+	}
+	return args[i]
 }
 
 // confirm asks yes/no; default is No. Empty, EOF, and invalid input return false.

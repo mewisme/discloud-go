@@ -17,16 +17,20 @@ func newChunksCmd() *cobra.Command {
 
 func newChunksCheckCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "check <sha256>",
+		Use:   "check [sha256]",
 		Short: "Check whether a chunk exists",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			hash, err := resolveArg(argOrEmpty(args, 0), "SHA-256: ")
+			if err != nil {
+				return err
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
 			ok, err := waitVal("Checking chunk…", func() (bool, error) {
-				return c.ChunkExists(args[0])
+				return c.ChunkExists(hash)
 			})
 			if err != nil {
 				return err
@@ -38,15 +42,19 @@ func newChunksCheckCmd() *cobra.Command {
 
 func newChunksPutCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "put <path>",
+		Use:   "put [path]",
 		Short: "Upload a raw chunk",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			path, err := resolveArg(argOrEmpty(args, 0), "Path: ")
+			if err != nil {
+				return err
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
-			data, err := os.ReadFile(args[0])
+			data, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}

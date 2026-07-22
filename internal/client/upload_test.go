@@ -23,7 +23,7 @@ func TestUploadChunkedSkipsExisting(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/info":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"bots": 1, "chunkSize": 4, "workers": 2,
+				"chunkSize": 4,
 			})
 		case r.Method == http.MethodHead && len(r.URL.Path) > len("/api/chunks/"):
 			hash := r.URL.Path[len("/api/chunks/"):]

@@ -15,15 +15,18 @@ func newGetCmd() *cobra.Command {
 		download, meta   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "get <id>",
+		Use:   "get [id]",
 		Short: "Download a file (or metadata with --meta)",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
-			id := args[0]
+			id, err := resolveFileID(c, argOrEmpty(args, 0))
+			if err != nil {
+				return err
+			}
 			wantMeta := meta || (flagJSON && !download && out == "")
 			outPath := out
 			if outPath == "" && download && !wantMeta {

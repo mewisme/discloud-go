@@ -3,31 +3,14 @@ import { apiURL, type UploadResult } from "@/lib/api";
 /**
  * Chunked upload: split into 8 MB pieces matching the server's storage chunk
  * size, SHA-256 hash each, skip uploads the server already has, then assemble.
- *
- * Worker count comes from GET /api/info.
  */
 const CHUNK_SIZE = 8 * 1024 * 1024;
 const DEFAULT_WORKERS = 3;
 const ATTEMPTS = 3;
 
-let workersPromise: Promise<number> | null = null;
-
-/** Parallel chunk POSTs — sized from GET /api/info.workers. */
+/** Parallel chunk POSTs (fixed; bot/worker counts are not public). */
 export async function uploadWorkers(): Promise<number> {
-  if (!workersPromise) {
-    workersPromise = fetch(apiURL("/api/info"), {
-      cache: "no-store",
-      credentials: "include",
-    })
-      .then(async (res) => {
-        if (!res.ok) return DEFAULT_WORKERS;
-        const body = (await res.json()) as { workers?: unknown };
-        const n = Number(body.workers);
-        return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 32) : DEFAULT_WORKERS;
-      })
-      .catch(() => DEFAULT_WORKERS);
-  }
-  return workersPromise;
+  return DEFAULT_WORKERS;
 }
 
 export async function uploadFileChunked(

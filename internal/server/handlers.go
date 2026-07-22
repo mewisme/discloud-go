@@ -28,6 +28,7 @@ const (
 	rangeWindow = 5 << 20
 	// singleBotUploadConcurrency is the in-flight Discord POST limit when only
 	// one bot token is configured (pipeline a few chunks despite one rate clock).
+	// Not exposed publicly — /api/info returns chunkSize only.
 	singleBotUploadConcurrency = 3
 	listLimit                  = 50
 	// maxChunksPerFile caps assembled metadata (~64 GiB at chunkSize).

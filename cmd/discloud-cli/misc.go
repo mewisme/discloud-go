@@ -8,51 +8,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newInfoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "info",
-		Short: "Show public upload config",
-		Args:  cobra.NoArgs,
-		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			c, err := apiClient()
-			if err != nil {
-				return err
-			}
-			info, err := waitVal("Loading info…", c.GetInfo)
-			if err != nil {
-				return err
-			}
-			if flagJSON {
-				return writeJSON(info)
-			}
-			on := colorOn(os.Stdout)
-			fmt.Printf("%s %s\n", dim(on, "bots:"), bold(on, fmt.Sprintf("%d", info.Bots)))
-			fmt.Printf("%s %s\n", dim(on, "chunkSize:"), fmt.Sprintf("%d", info.ChunkSize))
-			fmt.Printf("%s %s\n", dim(on, "workers:"), fmt.Sprintf("%d", info.Workers))
-			return nil
-		}),
-	}
-}
-
 func newHealthCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "health",
-		Short: "GET /healthz",
+		Short: "Check API liveness (/healthz)",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			c, err := apiClient()
-			if err != nil {
-				return err
-			}
-			s, err := waitVal("Checking health…", c.Health)
-			if err != nil {
-				return err
-			}
-			if flagJSON {
-				return writeJSON(map[string]string{"status": s})
-			}
-			printSuccess("%s", s)
-			return nil
+			return runProbe("liveness", "/healthz", "Alive", func(c *client.Client) (string, error) {
+				return waitVal("Checking health…", c.Health)
+			})
 		}),
 	}
 }
@@ -60,24 +24,41 @@ func newHealthCmd() *cobra.Command {
 func newReadyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ready",
-		Short: "GET /readyz",
+		Short: "Check API readiness (/readyz)",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			c, err := apiClient()
-			if err != nil {
-				return err
-			}
-			s, err := waitVal("Checking ready…", c.Ready)
-			if err != nil {
-				return err
-			}
-			if flagJSON {
-				return writeJSON(map[string]string{"status": s})
-			}
-			printSuccess("%s", s)
-			return nil
+			return runProbe("readiness", "/readyz", "Ready", func(c *client.Client) (string, error) {
+				return waitVal("Checking ready…", c.Ready)
+			})
 		}),
 	}
+}
+
+// runProbe hits a status endpoint and prints a labeled human summary (or JSON).
+func runProbe(kind, path, title string, call func(*client.Client) (string, error)) error {
+	c, err := apiClient()
+	if err != nil {
+		return err
+	}
+	status, err := call(c)
+	if err != nil {
+		return err
+	}
+	base := c.Config().BaseURL
+	if flagJSON {
+		return writeJSON(map[string]string{
+			"check":    kind,
+			"endpoint": path,
+			"base":     base,
+			"status":   status,
+		})
+	}
+	on := colorOn(os.Stdout)
+	printSuccess("%s", bold(on, title))
+	fmt.Printf("%s %s\n", dim(on, "  check:"), kind+" ("+path+")")
+	fmt.Printf("%s %s\n", dim(on, "  base:"), cyan(on, base))
+	fmt.Printf("%s %s\n", dim(on, "  status:"), green(on, status))
+	return nil
 }
 
 func newConfigCmd() *cobra.Command {
