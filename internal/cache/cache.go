@@ -41,6 +41,11 @@ func (c *Cache) Incr(ctx context.Context, key string) (int64, error) {
 	return c.client.Do(ctx, c.client.B().Incr().Key(key).Build()).AsInt64()
 }
 
+// IncrBy increments a key by n and returns the new value.
+func (c *Cache) IncrBy(ctx context.Context, key string, n int64) (int64, error) {
+	return c.client.Do(ctx, c.client.B().Incrby().Key(key).Increment(n).Build()).AsInt64()
+}
+
 // Expire sets a TTL on key.
 func (c *Cache) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	sec := int64(ttl.Seconds())

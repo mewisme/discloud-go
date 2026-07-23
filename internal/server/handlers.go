@@ -50,6 +50,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.allowUploadAuth(w, r) {
 		return
 	}
+	if !s.requireUploadRate(w, r) {
+		return
+	}
 	rawName := r.URL.Query().Get("fileName")
 	if rawName == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing fileName query param")
@@ -58,6 +61,23 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	fileName := formatFileName(rawName)
 	fileID := newID()
 
+	if cl := r.ContentLength; cl > 0 {
+		if cl > s.maxRawUploadBytes {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "Upload exceeds maximum size")
+			return
+		}
+		if !s.requireQuotaForUpload(w, r, cl) {
+			return
+		}
+	} else if _, ok := s.sessionUser(r); !ok {
+		// Anon without Content-Length: still consume daily upload count.
+		if !s.requireQuotaForUpload(w, r, 0) {
+			return
+		}
+	}
+
+	body := http.MaxBytesReader(w, r.Body, s.maxRawUploadBytes)
+
 	var (
 		mu    sync.Mutex
 		parts []store.FilePart
@@ -65,7 +85,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	g, ctx := errgroup.WithContext(r.Context())
 	g.SetLimit(s.discordUploadLimit())
 
-	fileSize, err := forEachChunk(r.Body, chunkSize, func(idx int, data []byte) error {
+	fileSize, err := forEachChunk(body, chunkSize, func(idx int, data []byte) error {
 		if ctx.Err() != nil { // an upload already failed; stop reading
 			return ctx.Err()
 		}
@@ -88,6 +108,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		err = uploadErr
 	}
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "Upload exceeds maximum size")
+			return
+		}
 		s.log.Error("upload failed", "file", fileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Upload failed")
 		return
@@ -95,6 +120,24 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if fileSize == 0 {
 		writeJSONError(w, http.StatusBadRequest, "Empty request body")
 		return
+	}
+	if r.ContentLength <= 0 {
+		if u, ok := s.sessionUser(r); ok {
+			if err := s.checkUserQuota(r.Context(), u.ID, fileSize); err != nil {
+				if err == errQuotaExceeded {
+					writeJSONError(w, http.StatusInsufficientStorage, "Storage quota exceeded")
+					return
+				}
+				writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+		} else if !s.requireAnonCompleteBytes(w, r, fileSize) {
+			return
+		}
+	} else if _, ok := s.sessionUser(r); !ok {
+		if !s.requireAnonCompleteBytes(w, r, fileSize) {
+			return
+		}
 	}
 
 	f, rawToken, err := s.newOwnedFile(r, fileID, fileName, fileSize, parts)
@@ -114,6 +157,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDownloadRate(w, r) {
+		return
+	}
 	access, err := s.authorizeFileAccess(r, r.PathValue("id"))
 	if errors.Is(err, errInvalidID) {
 		if r.URL.Query().Get("json") == "1" {

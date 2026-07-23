@@ -158,6 +158,14 @@ Compose injects `DATABASE_URL` and `VALKEY_URL` for containers. Set them yoursel
 | `API_URL` | (derive from request) | Public API origin for share links; not the UI URL |
 | `APP_SECRET` | auto `.app.secret` | HMAC root (≥32 chars). Env wins over file. Docker: `/data/.app.secret` |
 | `TRUST_PROXY` | off | Honor `X-Forwarded-For` / `X-Real-IP` only behind an edge that strips client values |
+| `RATE_LIMIT_UPLOAD_PER_MIN` | `60` | Upload RL per IP (+ per user when signed in). `0` = off |
+| `RATE_LIMIT_DOWNLOAD_PER_MIN` | `120` | Download RL per IP on `/f/{id}`. `0` = off |
+| `MAX_USER_BYTES` | `0` | Owned storage cap (bytes). `0` = unlimited |
+| `MAX_ANON_UPLOADS_PER_DAY` | `50` | Anon session creates per IP/day. `0` = unlimited |
+| `MAX_ANON_BYTES_PER_DAY` | `2GiB` | Anon completed bytes per IP/day. `0` = unlimited |
+| `MAX_RAW_UPLOAD_BYTES` | max file | Hard cap on `POST /api/upload` body |
+| `CAPTCHA_SECRET` | — | Turnstile secret; enables anon upload CAPTCHA when set |
+| `CAPTCHA_KEY` | — | Turnstile site key for the web UI (`GET /api/captcha`) |
 
 `WEB_ORIGIN` using `https` sets the session cookie Secure flag.
 
@@ -311,12 +319,12 @@ Release: tag `v*` → GoReleaser (CLI + GHCR `discloud` / `discloud-web`).
 
 ## Security
 
-- Auth is cookie sessions + CSRF tied to `WEB_ORIGIN`. There are no personal access tokens.
+- Auth is cookie sessions + CSRF tied to `WEB_ORIGIN`, plus optional personal access tokens (`dc_…`).
 - Private files need ownership or a one-time access token (rotatable).
 - Password-protected shares use Argon2id; denials are 401 (`password_required` / `password_invalid`).
 - Keep `DISCORD_BOT_TOKEN`, DB credentials, and `APP_SECRET` out of git and logs. Persist `/data` so secrets survive restarts.
 - Delete/cancel/revoke do not remove Discord attachments. Attachment lifetime is controlled by Discord, not this app.
-- Auth endpoints are rate-limited; upload/download quotas are not.
+- Auth, upload, and download paths are rate-limited (Valkey). Optional user/anon quotas and CAPTCHA — see env table. Set `TRUST_PROXY=true` only behind a trusted edge.
 
 Report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
 

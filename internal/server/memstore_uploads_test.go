@@ -70,6 +70,20 @@ func (m *memStore) CountOpenUploadSessionsAnon(_ context.Context, fingerprintPre
 	return n, nil
 }
 
+func (m *memStore) SumOpenUploadBytesByOwner(_ context.Context, ownerUserID string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ensureUploads()
+	var n int64
+	for _, u := range m.uploads {
+		if u.OwnerUserID != nil && *u.OwnerUserID == ownerUserID &&
+			(u.Status == store.UploadPending || u.Status == store.UploadUploading) {
+			n += u.FileSize
+		}
+	}
+	return n, nil
+}
+
 func (m *memStore) RegisterUploadPart(_ context.Context, uploadID string, idx int, hash string, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

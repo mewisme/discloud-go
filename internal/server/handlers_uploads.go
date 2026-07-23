@@ -16,13 +16,20 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.allowUploadAuth(w, r) {
 		return
 	}
+	if !s.requireUploadRate(w, r) {
+		return
+	}
 	var req struct {
 		FileName          string `json:"fileName"`
 		FileSize          int64  `json:"fileSize"`
 		ClientFingerprint string `json:"clientFingerprint"`
+		CaptchaToken      string `json:"captchaToken"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if !s.requireCaptcha(w, r, req.CaptchaToken) {
 		return
 	}
 	if req.FileSize <= 0 {
@@ -36,6 +43,9 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.FileName) == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing fileName")
+		return
+	}
+	if !s.requireQuotaForUpload(w, r, req.FileSize) {
 		return
 	}
 	name := formatFileName(req.FileName)
@@ -251,10 +261,27 @@ func (s *Server) handleCompleteUploadSession(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	if !s.requireUploadRate(w, r) {
+		return
+	}
 	now := s.now().UTC()
 	if up.Status != store.UploadCompleted &&
 		(up.Status == store.UploadCancelled || up.Status == store.UploadExpired || !up.ExpiresAt.After(now)) {
 		writeJSONError(w, http.StatusGone, "Upload session is no longer active")
+		return
+	}
+	if u, ok := s.sessionUser(r); ok {
+		// Open session bytes already include this upload; recheck owned+open only.
+		if err := s.checkUserQuota(r.Context(), u.ID, 0); err != nil {
+			if err == errQuotaExceeded {
+				writeJSONError(w, http.StatusInsufficientStorage, "Storage quota exceeded")
+				return
+			}
+			s.log.Error("user quota check failed", "error", err)
+			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	} else if !s.requireAnonCompleteBytes(w, r, up.FileSize) {
 		return
 	}
 

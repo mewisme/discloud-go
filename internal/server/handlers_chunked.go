@@ -51,6 +51,9 @@ func (s *Server) handleChunkUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.allowUploadAuth(w, r) {
 		return
 	}
+	if !s.requireUploadRate(w, r) {
+		return
+	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, chunkSize))
 	if err != nil {
 		writeJSONError(w, http.StatusRequestEntityTooLarge,
@@ -97,6 +100,9 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	if !s.allowUploadAuth(w, r) {
 		return
 	}
+	if !s.requireUploadRate(w, r) {
+		return
+	}
 	var req struct {
 		FileName    string   `json:"fileName"`
 		ChunkHashes []string `json:"chunkHashes"`
@@ -124,6 +130,11 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Estimate size upper bound for quota (actual size from chunk store at assemble).
+	est := int64(len(req.ChunkHashes)) * chunkSize
+	if !s.requireQuotaForUpload(w, r, est) {
+		return
+	}
 
 	f, rawToken, err := s.assembleFileFromHashes(r, req.FileName, req.ChunkHashes)
 	if err != nil {
@@ -135,6 +146,11 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("assemble failed", "file", req.FileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to assemble file")
 		return
+	}
+	if _, ok := s.sessionUser(r); !ok {
+		if !s.requireAnonCompleteBytes(w, r, f.Size) {
+			return
+		}
 	}
 	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(f.Size), "chunks", len(req.ChunkHashes))
 	s.writeFileCreated(w, r, f, rawToken)

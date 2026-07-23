@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -42,19 +43,36 @@ type Config struct {
 	CookieSecure bool
 	// TrustProxy honors X-Forwarded-For / X-Real-IP when a trusted edge strips client values.
 	TrustProxy bool
+
+	// Abuse protection (Phase 4). Zero rate limits disable that limiter.
+	RateLimitUploadPerMin   int   // POST chunks / upload / session create+complete (per IP + per user)
+	RateLimitDownloadPerMin int   // GET /f/{id} per IP
+	MaxUserBytes            int64 // 0 = unlimited owned storage
+	MaxAnonUploadsPerDay    int   // 0 = unlimited anon session creates per IP/day
+	MaxAnonBytesPerDay      int64 // 0 = unlimited anon completed bytes per IP/day
+	MaxRawUploadBytes       int64 // hard cap on POST /api/upload body (0 = max file size)
+	// CaptchaSecret enables Turnstile siteverify on anon upload session create when set.
+	CaptchaSecret string
 }
 
 func Load() (Config, error) {
 	c := Config{
-		Port:             getenv("PORT", "8080"),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		ValkeyURL:        os.Getenv("VALKEY_URL"),
-		DiscordBotToken:  strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
-		DiscordChannelID: os.Getenv("DISCORD_CHANNEL_ID"),
-		APIURL:           strings.TrimSpace(os.Getenv("API_URL")),
-		AppSecret:        os.Getenv("APP_SECRET"),
-		WebOrigin:        strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
-		TrustProxy:       envTruthy("TRUST_PROXY"),
+		Port:                    getenv("PORT", "8080"),
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		ValkeyURL:               os.Getenv("VALKEY_URL"),
+		DiscordBotToken:         strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
+		DiscordChannelID:        os.Getenv("DISCORD_CHANNEL_ID"),
+		APIURL:                  strings.TrimSpace(os.Getenv("API_URL")),
+		AppSecret:               os.Getenv("APP_SECRET"),
+		WebOrigin:               strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
+		TrustProxy:              envTruthy("TRUST_PROXY"),
+		RateLimitUploadPerMin:   envInt("RATE_LIMIT_UPLOAD_PER_MIN", 60),
+		RateLimitDownloadPerMin: envInt("RATE_LIMIT_DOWNLOAD_PER_MIN", 120),
+		MaxUserBytes:            envBytes("MAX_USER_BYTES", 0),
+		MaxAnonUploadsPerDay:    envInt("MAX_ANON_UPLOADS_PER_DAY", 50),
+		MaxAnonBytesPerDay:      envBytes("MAX_ANON_BYTES_PER_DAY", 2<<30),
+		MaxRawUploadBytes:       envBytes("MAX_RAW_UPLOAD_BYTES", 0),
+		CaptchaSecret:           strings.TrimSpace(os.Getenv("CAPTCHA_SECRET")),
 	}
 	for name, v := range map[string]string{
 		"DATABASE_URL":       c.DatabaseURL,
@@ -132,6 +150,31 @@ func envTruthy(key string) bool {
 	default:
 		return false
 	}
+}
+
+func envInt(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+// envBytes parses a plain integer byte count (no units). Empty → fallback.
+func envBytes(key string, fallback int64) int64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 // LoadOrCreateVisitorHashSalt returns the salt from path, or generates one and

@@ -50,6 +50,7 @@ type Store interface {
 	GetUploadSession(ctx context.Context, id string) (store.UploadSession, error)
 	CountOpenUploadSessionsByOwner(ctx context.Context, ownerUserID string) (int64, error)
 	CountOpenUploadSessionsAnon(ctx context.Context, fingerprintPrefix string) (int64, error)
+	SumOpenUploadBytesByOwner(ctx context.Context, ownerUserID string) (int64, error)
 	RegisterUploadPart(ctx context.Context, uploadID string, idx int, hash string, now time.Time) error
 	BeginUploadComplete(ctx context.Context, uploadID string, now time.Time) (store.UploadSession, error)
 	FinishUploadComplete(ctx context.Context, uploadID, fileID string, now time.Time) error
@@ -74,6 +75,7 @@ type Cache interface {
 	GetURL(ctx context.Context, messageID string) (string, bool)
 	SetURL(ctx context.Context, messageID, cdnURL string)
 	Incr(ctx context.Context, key string) (int64, error)
+	IncrBy(ctx context.Context, key string, n int64) (int64, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) error
 	Ping(ctx context.Context) error
 }
@@ -89,6 +91,14 @@ type Options struct {
 	TrustProxy bool
 	Keys       auth.Keys
 	Now        func() time.Time // nil → time.Now
+
+	RateLimitUploadPerMin   int
+	RateLimitDownloadPerMin int
+	MaxUserBytes            int64
+	MaxAnonUploadsPerDay    int
+	MaxAnonBytesPerDay      int64
+	MaxRawUploadBytes       int64
+	CaptchaSecret           string
 }
 
 type Server struct {
@@ -106,6 +116,17 @@ type Server struct {
 	// cdn streams chunk bytes from the Discord CDN. ResponseHeaderTimeout
 	// bounds hung connects; no Client.Timeout so slow body reads continue.
 	cdn *http.Client
+
+	rateLimitUploadPerMin   int
+	rateLimitDownloadPerMin int
+	maxUserBytes            int64
+	maxAnonUploadsPerDay    int
+	maxAnonBytesPerDay      int64
+	maxRawUploadBytes       int64
+	captchaSecret           string
+
+	// captchaVerify is set in tests; nil → Turnstile siteverify.
+	captchaVerify func(ctx context.Context, secret, token, ip string) error
 }
 
 func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, opts Options) *Server {
@@ -113,18 +134,29 @@ func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, opts Options)
 	if now == nil {
 		now = time.Now
 	}
+	maxRaw := opts.MaxRawUploadBytes
+	if maxRaw <= 0 {
+		maxRaw = int64(maxChunksPerFile) * chunkSize
+	}
 	return &Server{
-		log:           log,
-		store:         st,
-		cache:         ca,
-		discord:       dc,
-		publicBaseURL: opts.PublicBaseURL,
-		visitorSalt:   opts.VisitorSalt,
-		webOrigin:     opts.WebOrigin,
-		cookieSecure:  opts.CookieSecure,
-		trustProxy:    opts.TrustProxy,
-		keys:          opts.Keys,
-		now:           now,
+		log:                     log,
+		store:                   st,
+		cache:                   ca,
+		discord:                 dc,
+		publicBaseURL:           opts.PublicBaseURL,
+		visitorSalt:             opts.VisitorSalt,
+		webOrigin:               opts.WebOrigin,
+		cookieSecure:            opts.CookieSecure,
+		trustProxy:              opts.TrustProxy,
+		keys:                    opts.Keys,
+		now:                     now,
+		rateLimitUploadPerMin:   opts.RateLimitUploadPerMin,
+		rateLimitDownloadPerMin: opts.RateLimitDownloadPerMin,
+		maxUserBytes:            opts.MaxUserBytes,
+		maxAnonUploadsPerDay:    opts.MaxAnonUploadsPerDay,
+		maxAnonBytesPerDay:      opts.MaxAnonBytesPerDay,
+		maxRawUploadBytes:       maxRaw,
+		captchaSecret:           opts.CaptchaSecret,
 		cdn: &http.Client{
 			Transport: &http.Transport{
 				ResponseHeaderTimeout: 2 * time.Minute,
@@ -193,13 +225,20 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 // handleInfo is public upload sizing only — never expose bot/worker counts.
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	info := map[string]any{
 		"chunkSize": chunkSize,
 		"uploads": map[string]any{
 			"sessions":    true,
 			"maxFileSize": int64(maxChunksPerFile) * chunkSize,
 		},
-	})
+	}
+	if s.captchaEnabled() {
+		info["captcha"] = map[string]any{
+			"required": true,
+			"provider": "turnstile",
+		}
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 type statusRecorder struct {

@@ -140,6 +140,16 @@ func (s *Store) CountOpenUploadSessionsAnon(ctx context.Context, fingerprintPref
 	return n, err
 }
 
+// SumOpenUploadBytesByOwner sums file_size of open sessions for a user.
+func (s *Store) SumOpenUploadBytesByOwner(ctx context.Context, ownerUserID string) (int64, error) {
+	var n int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(file_size), 0)::bigint FROM upload_sessions
+		WHERE owner_user_id = $1::uuid AND status IN ('pending', 'uploading')`,
+		ownerUserID).Scan(&n)
+	return n, err
+}
+
 // RegisterUploadPart sets chunk hash for an index. Idempotent for same hash; conflict otherwise.
 func (s *Store) RegisterUploadPart(ctx context.Context, uploadID string, idx int, hash string, now time.Time) error {
 	tx, err := s.pool.Begin(ctx)

@@ -64,12 +64,19 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	srv := server.New(log, st, ca, dc, server.Options{
-		PublicBaseURL: cfg.APIURL,
-		VisitorSalt:   salt,
-		WebOrigin:     cfg.WebOrigin,
-		CookieSecure:  cfg.CookieSecure,
-		TrustProxy:    cfg.TrustProxy,
-		Keys:          auth.DeriveKeys(cfg.AppSecret),
+		PublicBaseURL:           cfg.APIURL,
+		VisitorSalt:             salt,
+		WebOrigin:               cfg.WebOrigin,
+		CookieSecure:            cfg.CookieSecure,
+		TrustProxy:              cfg.TrustProxy,
+		Keys:                    auth.DeriveKeys(cfg.AppSecret),
+		RateLimitUploadPerMin:   cfg.RateLimitUploadPerMin,
+		RateLimitDownloadPerMin: cfg.RateLimitDownloadPerMin,
+		MaxUserBytes:            cfg.MaxUserBytes,
+		MaxAnonUploadsPerDay:    cfg.MaxAnonUploadsPerDay,
+		MaxAnonBytesPerDay:      cfg.MaxAnonBytesPerDay,
+		MaxRawUploadBytes:       cfg.MaxRawUploadBytes,
+		CaptchaSecret:           cfg.CaptchaSecret,
 	})
 	go srv.RunCleanup(ctx)
 

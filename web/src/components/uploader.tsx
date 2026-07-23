@@ -12,12 +12,13 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
 import { ShareQR } from "@/components/share-qr";
 import { TokenRevealPanel } from "@/components/token-reveal";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import {
   Accordion,
   AccordionContent,
@@ -34,6 +35,12 @@ import {
   ProgressValue,
 } from "@/components/ui/progress";
 import { buildInspectPath, type UploadResult } from "@/lib/api";
+import {
+  ensureAuth,
+  getAuthServerSnapshot,
+  getAuthSnapshot,
+  subscribeAuth,
+} from "@/lib/auth";
 import { formatBytes, formatDate, formatSpeed } from "@/lib/format";
 import {
   cancelUpload,
@@ -54,9 +61,18 @@ import { cn } from "@/lib/utils";
 
 export function Uploader() {
   const state = useSyncExternalStore(subscribe, getState, getState);
+  const user = useSyncExternalStore(
+    subscribeAuth,
+    getAuthSnapshot,
+    getAuthServerSnapshot,
+  );
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void ensureAuth();
+  }, []);
 
   const addFiles = useCallback((list: FileList | File[] | null) => {
     if (!list?.length) return;
@@ -73,6 +89,7 @@ export function Uploader() {
 
   const busy = Boolean(state.uploading) || state.queue.length > 0;
   const processing = state.uploading?.phase === "processing";
+  const showCaptcha = user === null;
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -163,6 +180,18 @@ export function Uploader() {
           }}
         />
       </div>
+
+      {showCaptcha && (
+        <div
+          className="flex flex-col items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <TurnstileWidget active />
+          <p className="text-xs text-muted-foreground">
+            Complete the check before uploading (anonymous uploads).
+          </p>
+        </div>
+      )}
 
       {state.uploading && (
         <Card className="group w-full overflow-visible">

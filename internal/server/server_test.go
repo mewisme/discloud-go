@@ -598,6 +598,16 @@ func (c *memCache) Incr(_ context.Context, key string) (int64, error) {
 	return c.counts[key], nil
 }
 
+func (c *memCache) IncrBy(_ context.Context, key string, n int64) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.counts == nil {
+		c.counts = map[string]int64{}
+	}
+	c.counts[key] += n
+	return c.counts[key], nil
+}
+
 func (c *memCache) Expire(context.Context, string, time.Duration) error { return nil }
 
 func (c *memCache) Ping(context.Context) error { return nil }

@@ -1,4 +1,5 @@
 import { apiURL, type UploadResult } from "@/lib/api";
+import { takeCaptchaToken } from "@/lib/captcha";
 import {
   clearUploadRecord,
   findUploadRecord,
@@ -109,11 +110,13 @@ async function sessionUpload(
   }
 
   if (!uploadId) {
+    const captchaToken = await takeCaptchaToken(opts.signal);
     const created = await createUpload(
       fileName,
       file.size,
       fingerprint,
       opts.signal,
+      captchaToken,
     );
     uploadId = created.uploadId;
     resumeToken = created.resumeToken;
@@ -238,16 +241,29 @@ async function createUpload(
   fileSize: number,
   clientFingerprint: string,
   signal?: AbortSignal,
+  captchaToken?: string,
 ): Promise<{ uploadId: string; resumeToken: string }> {
   const res = await fetch(apiURL("/api/uploads"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName, fileSize, clientFingerprint }),
+    body: JSON.stringify({
+      fileName,
+      fileSize,
+      clientFingerprint,
+      ...(captchaToken ? { captchaToken } : {}),
+    }),
     credentials: "include",
     signal,
   });
   if (!res.ok) {
-    throw new Error(`Could not start upload (${res.status})`);
+    let detail = "";
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body.message) detail = `: ${body.message}`;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`Could not start upload (${res.status})${detail}`);
   }
   return (await res.json()) as { uploadId: string; resumeToken: string };
 }

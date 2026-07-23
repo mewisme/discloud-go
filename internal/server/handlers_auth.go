@@ -438,22 +438,6 @@ func (s *Server) allowUploadAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (s *Server) allowAuth(r *http.Request, kind string) bool {
-	key := "discloud:rl:" + kind + ":" + s.clientIP(r)
-	n, err := s.cache.Incr(r.Context(), key)
-	if err != nil {
-		s.log.Error("rate limit incr failed", "error", err)
-		return false // fail closed
-	}
-	if n == 1 {
-		if err := s.cache.Expire(r.Context(), key, authRateLimitWindow); err != nil {
-			s.log.Error("rate limit expire failed", "error", err)
-			return false
-		}
-	}
-	return n <= authRateLimit
-}
-
 // fileAccess is the result of authorizeFileAccess.
 type fileAccess struct {
 	File     store.File

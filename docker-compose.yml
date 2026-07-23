@@ -15,6 +15,7 @@ services:
       # Optional — if unset, API auto-generates /data/.app.secret
       APP_SECRET: ${APP_SECRET:-}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      CAPTCHA_SECRET: ${CAPTCHA_SECRET:-}
       GOMEMLIMIT: 96MiB
       GOGC: "50"
     ports:
@@ -41,6 +42,8 @@ services:
       API_URL: ${API_URL:-http://localhost:8080}
       # Server-side proxy for /install.sh|/install.ps1 (compose network).
       API_UPSTREAM: http://api:8080
+      # Turnstile site key for /api/captcha (runtime; no rebuild needed).
+      CAPTCHA_KEY: ${CAPTCHA_KEY:-}
       NODE_OPTIONS: --max-old-space-size=192
     ports:
       - "3000:3000"
