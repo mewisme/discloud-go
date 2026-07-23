@@ -66,6 +66,7 @@ type DownloadOptions struct {
 	Download bool
 	JSON     bool
 	Token    string
+	Password string
 	OutPath  string // empty → return bytes / write stdout by caller
 }
 
@@ -88,7 +89,11 @@ func (c *Client) Download(id string, opt DownloadOptions) ([]byte, error) {
 	if enc := q.Encode(); enc != "" {
 		path += "?" + enc
 	}
-	res, err := c.Do(http.MethodGet, path, nil, "")
+	headers := map[string]string{}
+	if opt.Password != "" {
+		headers["X-File-Password"] = opt.Password
+	}
+	res, err := c.doWithHeaders(http.MethodGet, path, nil, "", headers)
 	if err != nil {
 		return nil, err
 	}

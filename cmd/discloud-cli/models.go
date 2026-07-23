@@ -23,6 +23,10 @@ type FileItem struct {
 	OwnedByCurrentUser bool      `json:"ownedByCurrentUser,omitempty"`
 	CreatedAt          time.Time `json:"createdAt"`
 	ExpiresAt          time.Time `json:"expiresAt"`
+	PasswordProtected  bool      `json:"passwordProtected,omitempty"`
+	ShareMode          string    `json:"shareMode,omitempty"`
+	MaxDownloads       *int      `json:"maxDownloads"`
+	DownloadCount      int       `json:"downloadCount,omitempty"`
 	URL                string    `json:"url,omitempty"`
 	LongURL            string    `json:"longURL,omitempty"`
 	DownloadURL        string    `json:"downloadURL,omitempty"`
@@ -89,6 +93,10 @@ type InspectResponse struct {
 	Visibility         string     `json:"visibility"`
 	Status             string     `json:"status,omitempty"`
 	OwnedByCurrentUser bool       `json:"ownedByCurrentUser"`
+	PasswordProtected  bool       `json:"passwordProtected,omitempty"`
+	ShareMode          string     `json:"shareMode,omitempty"`
+	MaxDownloads       *int       `json:"maxDownloads"`
+	DownloadCount      int        `json:"downloadCount,omitempty"`
 	Views              int64      `json:"views"`
 	Downloads          int64      `json:"downloads"`
 	Ranges             int64      `json:"ranges"`

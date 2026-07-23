@@ -1,6 +1,8 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -64,4 +66,43 @@ func (c *Client) RotateToken(id string) (map[string]any, error) {
 // DeleteFile removes file metadata (204).
 func (c *Client) DeleteFile(id string) error {
 	return c.DoJSON(http.MethodDelete, "/api/files/"+url.PathEscape(id), nil, nil)
+}
+
+// FileShareUpdate is a PATCH /api/files/{id}/share body.
+type FileShareUpdate struct {
+	Password     *string `json:"password,omitempty"`
+	ExpiresAt    *string `json:"expiresAt,omitempty"`
+	MaxDownloads *int    `json:"maxDownloads,omitempty"`
+	ShareMode    *string `json:"shareMode,omitempty"`
+}
+
+// UpdateShare patches share settings (password, expiry, max downloads, mode).
+func (c *Client) UpdateShare(id string, patch FileShareUpdate) (map[string]any, error) {
+	var out map[string]any
+	err := c.DoJSON(http.MethodPatch, "/api/files/"+url.PathEscape(id)+"/share", patch, &out)
+	return out, err
+}
+
+// UnlockFile verifies a share password and sets the unlock cookie in the jar.
+func (c *Client) UnlockFile(id, password, token string) error {
+	path := "/api/files/" + url.PathEscape(id) + "/unlock"
+	b, err := json.Marshal(map[string]string{"password": password})
+	if err != nil {
+		return err
+	}
+	headers := map[string]string{}
+	if token != "" {
+		headers["X-File-Token"] = token
+	}
+	res, err := c.doWithHeaders(http.MethodPost, path, bytes.NewReader(b), "application/json", headers)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	return decodeResponse(res, nil)
+}
+
+// RevokeFile force-expires a file and clears its password.
+func (c *Client) RevokeFile(id string) error {
+	return c.DoJSON(http.MethodPost, "/api/files/"+url.PathEscape(id)+"/revoke", map[string]any{}, nil)
 }

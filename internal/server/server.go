@@ -56,6 +56,9 @@ type Store interface {
 	AbortUploadComplete(ctx context.Context, uploadID string, now time.Time) error
 	CancelUploadSession(ctx context.Context, uploadID string, now time.Time) error
 	ExpireUploadSessions(ctx context.Context, now time.Time, limit int) (int64, error)
+	UpdateFileShare(ctx context.Context, id string, p store.FileSharePatch) error
+	IncrementDownloadCount(ctx context.Context, id string) error
+	RevokeFile(ctx context.Context, id string, now time.Time) error
 	Ping(ctx context.Context) error
 }
 
@@ -145,6 +148,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/files/{id}", s.handleGetFile)
 	mux.HandleFunc("GET /api/files/{id}/inspect", s.handleInspect)
 	mux.HandleFunc("PATCH /api/files/{id}/visibility", s.handleVisibility)
+	mux.HandleFunc("PATCH /api/files/{id}/share", s.handleShareSettings)
+	mux.HandleFunc("POST /api/files/{id}/unlock", s.handleUnlockFile)
+	mux.HandleFunc("POST /api/files/{id}/revoke", s.handleRevokeFile)
 	mux.HandleFunc("POST /api/files/{id}/access-token/rotate", s.handleRotateToken)
 	mux.HandleFunc("DELETE /api/files/{id}", s.handleDeleteFile)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
@@ -233,7 +239,7 @@ func (s *Server) withCORSAndCSRF(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Range, X-File-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Range, X-File-Token, X-File-Password, X-Upload-Token")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

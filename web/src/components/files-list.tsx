@@ -10,6 +10,7 @@ import {
   KeyRound,
   MoreHorizontal,
   Search,
+  Share2,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -216,6 +217,14 @@ function ownedColumns(actions: OwnedActions): ColumnDef<OwnedFile>[] {
                 >
                   <Search aria-hidden />
                   Inspect
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  nativeButton={false}
+                  closeOnClick
+                  render={<Link href={buildInspectPath(f.fileId)} />}
+                >
+                  <Share2 aria-hidden />
+                  Share settings
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />

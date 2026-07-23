@@ -128,6 +128,14 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot find the specified file", http.StatusNotFound)
 		return
 	}
+	if errors.Is(err, errPasswordRequired) || errors.Is(err, errPasswordInvalid) {
+		if r.URL.Query().Get("json") == "1" {
+			writePasswordError(w, err)
+			return
+		}
+		writePasswordErrorPlain(w, err)
+		return
+	}
 	if err != nil {
 		s.log.Error("get file failed", "id", r.PathValue("id"), "error", err)
 		if r.URL.Query().Get("json") == "1" {
@@ -148,7 +156,28 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isDownload := r.URL.Query().Get("download") == "1"
+	if isDownload && f.ShareMode == store.ShareModeView {
+		http.Error(w, "Downloads are disabled for this file", http.StatusForbidden)
+		return
+	}
+
 	wantExtend := isDownload && r.Method != http.MethodHead && r.Header.Get("Range") == ""
+	wantCount := wantExtend && !access.Manager
+	if wantCount {
+		if err := s.store.IncrementDownloadCount(r.Context(), f.ID); err != nil {
+			if errors.Is(err, store.ErrDownloadLimit) {
+				http.Error(w, "Download limit reached", http.StatusGone)
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				http.Error(w, "Cannot find the specified file", http.StatusNotFound)
+				return
+			}
+			s.log.Error("increment download count failed", "file", f.ID, "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Single-chunk + inline: 302 to Discord CDN so file bytes skip our egress.
 	if !isDownload && len(f.Parts) == 1 {
@@ -358,6 +387,10 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
 		return
 	}
+	if errors.Is(err, errPasswordRequired) || errors.Is(err, errPasswordInvalid) {
+		writePasswordError(w, err)
+		return
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -454,7 +487,11 @@ func (s *Server) fileLinksResponse(base string, f store.File, rawToken string, v
 	longPath := withToken(base+"/f/"+f.ID+"/"+f.Name, rawToken)
 	dl := withTokenQuery(base+"/f/"+f.ID, "download", "1", rawToken)
 	longDL := withTokenQuery(base+"/f/"+f.ID+"/"+f.Name, "download", "1", rawToken)
-	return map[string]any{
+	mode := f.ShareMode
+	if mode == "" {
+		mode = store.ShareModeDownload
+	}
+	out := map[string]any{
 		"fileId":             f.ID,
 		"fileName":           f.Name,
 		"fileSize":           f.Size,
@@ -464,11 +501,22 @@ func (s *Server) fileLinksResponse(base string, f store.File, rawToken string, v
 		"ownedByCurrentUser": ownedByUser(viewer, f),
 		"createdAt":          f.CreatedAt,
 		"expiresAt":          f.ExpiresAt,
+		"passwordProtected":  f.PasswordHash != "",
+		"shareMode":          mode,
 		"url":                urlPath,
 		"longURL":            longPath,
 		"downloadURL":        dl,
 		"longDownloadURL":    longDL,
 	}
+	if ownedByUser(viewer, f) || (viewer != nil && viewer.Role == store.RoleAdmin) {
+		out["downloadCount"] = f.DownloadCount
+		if f.MaxDownloads != nil {
+			out["maxDownloads"] = *f.MaxDownloads
+		} else {
+			out["maxDownloads"] = nil
+		}
+	}
+	return out
 }
 
 func fileStatusOrReady(status string) string {

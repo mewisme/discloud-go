@@ -21,25 +21,29 @@ type File struct {
 
 // Inspect holds the fields PrintInspect needs (same names as InspectResponse).
 type Inspect struct {
-	FileID          string
-	FileName        string
-	FileSize        int64
-	ChunkSize       int64
-	ChunkCount      int
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
-	Visibility      string
-	Status          string
-	Views           int64
-	Downloads       int64
-	Ranges          int64
-	BytesServed     int64
-	UniqueVisitors  int64
-	LastAccessAt    *time.Time
-	URL             string
-	LongURL         string
-	DownloadURL     string
-	LongDownloadURL string
+	FileID            string
+	FileName          string
+	FileSize          int64
+	ChunkSize         int64
+	ChunkCount        int
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+	Visibility        string
+	Status            string
+	PasswordProtected bool
+	ShareMode         string
+	MaxDownloads      *int
+	DownloadCount     int
+	Views             int64
+	Downloads         int64
+	Ranges            int64
+	BytesServed       int64
+	UniqueVisitors    int64
+	LastAccessAt      *time.Time
+	URL               string
+	LongURL           string
+	DownloadURL       string
+	LongDownloadURL   string
 }
 
 // KVBlock is one labeled section inside a combined FIELD/VALUE table.
@@ -249,12 +253,15 @@ func PrintInspect(w io.Writer, item Inspect) error {
 			{"chunks", fmt.Sprintf("%d × %s", item.ChunkCount, client.FormatBytes(item.ChunkSize))},
 			{"visibility", ShortVis(item.Visibility)},
 			{"status", ShortStatus(item.Status)},
+			{"share mode", shareModeOrDefault(item.ShareMode)},
+			{"password", fmt.Sprintf("%v", item.PasswordProtected)},
 			{"created", FormatTime(item.CreatedAt)},
 			{"expires", FormatTime(item.ExpiresAt)},
 		}},
 		{Title: "Stats", Rows: [][]string{
 			{"views", fmt.Sprintf("%d", item.Views)},
 			{"downloads", fmt.Sprintf("%d", item.Downloads)},
+			{"share downloads", shareDownloadLine(item)},
 			{"ranges", fmt.Sprintf("%d", item.Ranges)},
 			{"bytes served", client.FormatBytes(item.BytesServed)},
 			{"unique visitors", fmt.Sprintf("%d", item.UniqueVisitors)},
@@ -267,6 +274,20 @@ func PrintInspect(w io.Writer, item Inspect) error {
 			{"long download", item.LongDownloadURL},
 		}},
 	})
+}
+
+func shareModeOrDefault(mode string) string {
+	if mode == "" {
+		return "download"
+	}
+	return mode
+}
+
+func shareDownloadLine(item Inspect) string {
+	if item.MaxDownloads == nil {
+		return fmt.Sprintf("%d / unlimited", item.DownloadCount)
+	}
+	return fmt.Sprintf("%d / %d", item.DownloadCount, *item.MaxDownloads)
 }
 
 // contentWidths returns max terminal display width per column.

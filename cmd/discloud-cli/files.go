@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
@@ -20,6 +21,8 @@ func newFilesCmd() *cobra.Command {
 		newFilesGetCmd(),
 		newFilesInspectCmd(),
 		newFilesVisibilityCmd(),
+		newFilesShareCmd(),
+		newFilesRevokeCmd(),
 		newFilesRotateTokenCmd(),
 		newFilesDeleteCmd(),
 	)
@@ -228,6 +231,137 @@ func newFilesVisibilityCmd() *cobra.Command {
 				rows = append(rows, []string{ui.IconOK, "Token", item.AccessToken})
 			}
 			return ui.PrintGlyphTable(os.Stdout, rows)
+		}),
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	return cmd
+}
+
+func newFilesShareCmd() *cobra.Command {
+	var (
+		password      string
+		clearPassword bool
+		expires       string
+		maxDownloads  int
+		clearMaxDL    bool
+		mode          string
+	)
+	cmd := &cobra.Command{
+		Use:   "share [id]",
+		Short: "Update share settings (password, expiry, download cap, mode)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			c, err := apiClient()
+			if err != nil {
+				return err
+			}
+			id, err := resolveFileID(c, ui.ArgOrEmpty(args, 0))
+			if err != nil {
+				return err
+			}
+			patch := client.FileShareUpdate{}
+			changed := false
+			if clearPassword {
+				empty := ""
+				patch.Password = &empty
+				changed = true
+			} else if password != "" {
+				patch.Password = &password
+				changed = true
+			}
+			if expires != "" {
+				patch.ExpiresAt = &expires
+				changed = true
+			}
+			if clearMaxDL {
+				zero := 0
+				patch.MaxDownloads = &zero
+				changed = true
+			} else if cmd.Flags().Changed("max-downloads") {
+				patch.MaxDownloads = &maxDownloads
+				changed = true
+			}
+			if mode != "" {
+				if mode != "view" && mode != "download" {
+					return fmt.Errorf("mode must be view or download")
+				}
+				patch.ShareMode = &mode
+				changed = true
+			}
+			if !changed {
+				return fmt.Errorf("pass at least one of --password, --clear-password, --expires, --max-downloads, --clear-max-downloads, --mode")
+			}
+			raw, err := ui.WaitVal("Updating share…", func() (map[string]any, error) {
+				return c.UpdateShare(id, patch)
+			})
+			if err != nil {
+				return err
+			}
+			item, err := decode[FileItem](raw)
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return writeJSON(item)
+			}
+			rows := [][]string{
+				{ui.IconOK, "File", item.FileID},
+				{ui.IconOK, "Mode", item.ShareMode},
+				{ui.IconOK, "Password", fmt.Sprintf("%v", item.PasswordProtected)},
+				{ui.IconOK, "Expires", item.ExpiresAt.UTC().Format(time.RFC3339)},
+			}
+			if item.MaxDownloads != nil {
+				rows = append(rows, []string{ui.IconOK, "Max downloads", fmt.Sprintf("%d", *item.MaxDownloads)})
+			} else {
+				rows = append(rows, []string{ui.IconOK, "Max downloads", "unlimited"})
+			}
+			rows = append(rows, []string{ui.IconOK, "Download count", fmt.Sprintf("%d", item.DownloadCount)})
+			return ui.PrintGlyphTable(os.Stdout, rows)
+		}),
+	}
+	cmd.Flags().StringVar(&password, "password", "", "set share password")
+	cmd.Flags().BoolVar(&clearPassword, "clear-password", false, "remove share password")
+	cmd.Flags().StringVar(&expires, "expires", "", "RFC3339 expiry (within 30 days)")
+	cmd.Flags().IntVar(&maxDownloads, "max-downloads", 0, "download cap (use --clear-max-downloads for unlimited)")
+	cmd.Flags().BoolVar(&clearMaxDL, "clear-max-downloads", false, "remove download cap")
+	cmd.Flags().StringVar(&mode, "mode", "", "view or download")
+	return cmd
+}
+
+func newFilesRevokeCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "revoke [id]",
+		Short: "Force-expire a share without deleting the file row",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			c, err := apiClient()
+			if err != nil {
+				return err
+			}
+			id, err := resolveFileID(c, ui.ArgOrEmpty(args, 0))
+			if err != nil {
+				return err
+			}
+			if !yes {
+				if !ui.IsTTY(os.Stdin) || flagJSON {
+					return fmt.Errorf("refusing revoke without -y (non-interactive)")
+				}
+				if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Revoke share for %s?", id)) {
+					return fmt.Errorf("aborted")
+				}
+			}
+			if err := ui.WithSpinner("Revoking…", func() error {
+				return c.RevokeFile(id)
+			}); err != nil {
+				return err
+			}
+			if flagJSON {
+				return writeJSON(map[string]any{"revoked": true, "fileId": id})
+			}
+			on := ui.ColorOn(os.Stdout)
+			ui.PrintSuccess("Revoked %s", ui.Cyan(on, id))
+			return nil
 		}),
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
@@ -454,24 +588,28 @@ func toUIFiles(files []FileItem) []ui.File {
 
 func toUIInspect(item InspectResponse) ui.Inspect {
 	return ui.Inspect{
-		FileID:          item.FileID,
-		FileName:        item.FileName,
-		FileSize:        item.FileSize,
-		ChunkSize:       item.ChunkSize,
-		ChunkCount:      item.ChunkCount,
-		CreatedAt:       item.CreatedAt,
-		ExpiresAt:       item.ExpiresAt,
-		Visibility:      item.Visibility,
-		Status:          item.Status,
-		Views:           item.Views,
-		Downloads:       item.Downloads,
-		Ranges:          item.Ranges,
-		BytesServed:     item.BytesServed,
-		UniqueVisitors:  item.UniqueVisitors,
-		LastAccessAt:    item.LastAccessAt,
-		URL:             item.URL,
-		LongURL:         item.LongURL,
-		DownloadURL:     item.DownloadURL,
-		LongDownloadURL: item.LongDownloadURL,
+		FileID:            item.FileID,
+		FileName:          item.FileName,
+		FileSize:          item.FileSize,
+		ChunkSize:         item.ChunkSize,
+		ChunkCount:        item.ChunkCount,
+		CreatedAt:         item.CreatedAt,
+		ExpiresAt:         item.ExpiresAt,
+		Visibility:        item.Visibility,
+		Status:            item.Status,
+		PasswordProtected: item.PasswordProtected,
+		ShareMode:         item.ShareMode,
+		MaxDownloads:      item.MaxDownloads,
+		DownloadCount:     item.DownloadCount,
+		Views:             item.Views,
+		Downloads:         item.Downloads,
+		Ranges:            item.Ranges,
+		BytesServed:       item.BytesServed,
+		UniqueVisitors:    item.UniqueVisitors,
+		LastAccessAt:      item.LastAccessAt,
+		URL:               item.URL,
+		LongURL:           item.LongURL,
+		DownloadURL:       item.DownloadURL,
+		LongDownloadURL:   item.LongDownloadURL,
 	}
 }

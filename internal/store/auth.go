@@ -28,6 +28,12 @@ const (
 	FileStatusReused = "reused"
 )
 
+// ShareMode values for files.share_mode.
+const (
+	ShareModeDownload = "download"
+	ShareModeView     = "view"
+)
+
 // ErrConflict is returned for unique constraint violations (e.g. username).
 var ErrConflict = errors.New("conflict")
 

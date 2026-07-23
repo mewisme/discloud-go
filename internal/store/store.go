@@ -43,6 +43,10 @@ type File struct {
 	AccessTokenHash      string     `json:"-"`
 	AccessTokenRotatedAt *time.Time `json:"-"`
 	ExpiresAt            time.Time  `json:"expiresAt"`
+	PasswordHash         string     `json:"-"`
+	MaxDownloads         *int       `json:"maxDownloads,omitempty"`
+	DownloadCount        int        `json:"downloadCount"`
+	ShareMode            string     `json:"shareMode"`
 	Parts                []FilePart `json:"-"`
 }
 
@@ -165,9 +169,10 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 
 func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
-		       access_token_hash, access_token_rotated_at, expires_at
-		FROM files WHERE id = $1`, id)
+			SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
+			       access_token_hash, access_token_rotated_at, expires_at,
+			       password_hash, max_downloads, download_count, share_mode
+			FROM files WHERE id = $1`, id)
 	f, err := scanFileMeta(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return File{}, ErrNotFound
@@ -234,8 +239,11 @@ func scanFileMeta(row scannable) (File, error) {
 	var owner *string
 	var tokenHash *string
 	var rotated *time.Time
+	var pwHash *string
+	var maxDL *int
 	err := row.Scan(&f.ID, &f.Name, &f.Size, &f.ChunkSize, &f.CreatedAt,
-		&owner, &f.Visibility, &f.Status, &tokenHash, &rotated, &f.ExpiresAt)
+		&owner, &f.Visibility, &f.Status, &tokenHash, &rotated, &f.ExpiresAt,
+		&pwHash, &maxDL, &f.DownloadCount, &f.ShareMode)
 	if err != nil {
 		return File{}, err
 	}
@@ -248,8 +256,15 @@ func scanFileMeta(row scannable) (File, error) {
 		f.AccessTokenHash = *tokenHash
 	}
 	f.AccessTokenRotatedAt = rotated
+	if pwHash != nil {
+		f.PasswordHash = *pwHash
+	}
+	f.MaxDownloads = maxDL
 	if f.Status == "" {
 		f.Status = FileStatusReady
+	}
+	if f.ShareMode == "" {
+		f.ShareMode = ShareModeDownload
 	}
 	return f, nil
 }
@@ -337,7 +352,8 @@ func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chun
 func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]File, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
-		       access_token_hash, access_token_rotated_at, expires_at
+		       access_token_hash, access_token_rotated_at, expires_at,
+		       password_hash, max_downloads, download_count, share_mode
 		FROM files
 		WHERE owner_user_id = $1
 		ORDER BY created_at DESC, id DESC

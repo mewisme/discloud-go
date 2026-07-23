@@ -33,6 +33,8 @@ import {
 } from "@/components/ui/table"
 
 declare module "@tanstack/react-table" {
+  // TData/TValue required for declaration merging with TanStack Table.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- module augmentation signature
   interface ColumnMeta<TData, TValue> {
     className?: string
     headerClassName?: string
@@ -98,6 +100,8 @@ export function DataTable<TData, TValue>({
     pageSize: initialPageSize,
   })
 
+  // TanStack Table returns unstable function refs; React Compiler skips memoizing this.
+  // eslint-disable-next-line react-hooks/incompatible-library -- known TanStack Table limitation
   const table = useReactTable({
     data,
     columns,

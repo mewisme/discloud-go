@@ -18,6 +18,9 @@ const (
 	maxPathDepth          = 32
 	maxFileNameLen        = 512
 
+	fileUnlockTTL      = time.Hour
+	filePasswordHeader = "X-File-Password"
+
 	sessionCookieName = "discloud_session"
 	uploadTokenHeader = "X-Upload-Token"
 

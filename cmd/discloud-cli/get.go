@@ -12,8 +12,8 @@ import (
 
 func newGetCmd() *cobra.Command {
 	var (
-		name, token, out string
-		download, meta   bool
+		name, token, password, out string
+		download, meta             bool
 	)
 	cmd := &cobra.Command{
 		Use:   "get [id]",
@@ -42,7 +42,7 @@ func newGetCmd() *cobra.Command {
 			}
 			data, err := ui.WaitVal(msg, func() ([]byte, error) {
 				return c.Download(id, client.DownloadOptions{
-					Name: name, Download: download, JSON: wantMeta, Token: token, OutPath: outPath,
+					Name: name, Download: download, JSON: wantMeta, Token: token, Password: password, OutPath: outPath,
 				})
 			})
 			if err != nil {
@@ -66,6 +66,7 @@ func newGetCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&name, "name", "", "name path segment")
 	cmd.Flags().StringVar(&token, "token", "", "access token for private files")
+	cmd.Flags().StringVar(&password, "password", "", "share password (X-File-Password)")
 	cmd.Flags().StringVar(&out, "out", "", "write body to this path")
 	cmd.Flags().BoolVar(&download, "download", false, "request download disposition / extend retention")
 	cmd.Flags().BoolVar(&meta, "meta", false, "fetch JSON metadata from API (?json=1)")

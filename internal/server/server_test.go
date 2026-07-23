@@ -135,6 +135,9 @@ func (m *memStore) CreateFile(_ context.Context, f store.File) error {
 	if f.Status == "" {
 		f.Status = store.FileStatusReady
 	}
+	if f.ShareMode == "" {
+		f.ShareMode = store.ShareModeDownload
+	}
 	m.files[f.ID] = f
 	m.ensureStats(f.ID)
 	return nil

@@ -62,4 +62,14 @@ func TestDeriveKeysDomainSeparated(t *testing.T) {
 	if k.UploadTokenMatch("other", up) {
 		t.Fatal("UploadTokenMatch should reject wrong token")
 	}
+	sig := k.SignFileUnlock("abc123", 9999999999)
+	if !k.FileUnlockMatch("abc123", sig, 1000) {
+		t.Fatal("FileUnlockMatch should accept valid unlock")
+	}
+	if k.FileUnlockMatch("abc123", sig, 99999999999) {
+		t.Fatal("FileUnlockMatch should reject expired unlock")
+	}
+	if k.FileUnlockMatch("other", sig, 1000) {
+		t.Fatal("FileUnlockMatch should reject wrong file id")
+	}
 }

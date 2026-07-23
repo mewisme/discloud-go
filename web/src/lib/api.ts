@@ -40,6 +40,8 @@ export type AccountMe = {
 /** Upload outcome badge on a file record. */
 export type FileStatus = "ready" | "reused";
 
+export type ShareMode = "view" | "download";
+
 /** Shared file link payload from upload / file APIs. */
 export interface FileLinks {
   fileId: string;
@@ -54,6 +56,10 @@ export interface FileLinks {
   ownedByCurrentUser?: boolean;
   createdAt?: string;
   expiresAt?: string;
+  passwordProtected?: boolean;
+  shareMode?: ShareMode;
+  maxDownloads?: number | null;
+  downloadCount?: number;
   /** Present once when upload creates a private file. */
   accessToken?: string;
 }
@@ -71,6 +77,10 @@ export interface FileMeta {
   visibility?: Visibility;
   status?: FileStatus;
   ownedByCurrentUser?: boolean;
+  passwordProtected?: boolean;
+  shareMode?: ShareMode;
+  maxDownloads?: number | null;
+  downloadCount?: number;
 }
 
 /** Owner list item from GET /api/files */
@@ -93,6 +103,10 @@ export interface FileInspect {
   visibility?: Visibility;
   status?: FileStatus;
   ownedByCurrentUser?: boolean;
+  passwordProtected?: boolean;
+  shareMode?: ShareMode;
+  maxDownloads?: number | null;
+  downloadCount?: number;
   views: number;
   downloads: number;
   ranges: number;
@@ -113,10 +127,12 @@ export type TokenRevealResult = {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -194,14 +210,18 @@ export function withPublicURLs(result: UploadResult): UploadResult {
   };
 }
 
-async function readMessage(res: Response): Promise<string> {
+async function readError(res: Response): Promise<{ message: string; code?: string }> {
   try {
-    const body = (await res.json()) as { message?: string };
-    if (body.message) return body.message;
+    const body = (await res.json()) as { message?: string; code?: string };
+    if (body.message) return { message: body.message, code: body.code };
   } catch {
     /* ignore */
   }
-  return `Request failed (${res.status})`;
+  return { message: `Request failed (${res.status})` };
+}
+
+async function readMessage(res: Response): Promise<string> {
+  return (await readError(res)).message;
 }
 
 /** Credentialed fetch against the API. JSON body when `json` is set. */
@@ -223,7 +243,10 @@ export async function apiFetch<T>(
     credentials: "include",
     cache: "no-store",
   });
-  if (!res.ok) throw new ApiError(res.status, await readMessage(res));
+  if (!res.ok) {
+    const err = await readError(res);
+    throw new ApiError(res.status, err.message, err.code);
+  }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   if (!text) return undefined as T;
@@ -320,6 +343,41 @@ export async function deleteFile(fileId: string): Promise<void> {
   await apiFetch<void>(`/api/files/${fileId}`, { method: "DELETE" });
 }
 
+export type FileShareUpdate = {
+  password?: string;
+  expiresAt?: string;
+  maxDownloads?: number;
+  shareMode?: ShareMode;
+};
+
+export async function updateFileShare(
+  fileId: string,
+  patch: FileShareUpdate,
+): Promise<OwnedFile> {
+  return apiFetch<OwnedFile>(`/api/files/${fileId}/share`, {
+    method: "PATCH",
+    json: patch,
+  });
+}
+
+export async function unlockFile(
+  fileId: string,
+  password: string,
+  token?: string,
+): Promise<void> {
+  const headers = new Headers();
+  if (token) headers.set("X-File-Token", token);
+  await apiFetch<void>(`/api/files/${fileId}/unlock`, {
+    method: "POST",
+    json: { password },
+    headers,
+  });
+}
+
+export async function revokeFile(fileId: string): Promise<void> {
+  await apiFetch<void>(`/api/files/${fileId}/revoke`, { method: "POST" });
+}
+
 export async function fetchFileMeta(
   fileId: string,
   init?: RequestInit & { token?: string },
@@ -331,7 +389,10 @@ export async function fetchFileMeta(
     ...rest,
   });
   if (res.status === 404) throw new Error("File not found on server");
-  if (!res.ok) throw new Error(await readMessage(res));
+  if (!res.ok) {
+    const err = await readError(res);
+    throw new ApiError(res.status, err.message, err.code);
+  }
   return (await res.json()) as FileMeta;
 }
 
@@ -346,6 +407,9 @@ export async function fetchFileInspect(
     ...rest,
   });
   if (res.status === 404) throw new Error("File not found on server");
-  if (!res.ok) throw new Error(await readMessage(res));
+  if (!res.ok) {
+    const err = await readError(res);
+    throw new ApiError(res.status, err.message, err.code);
+  }
   return (await res.json()) as FileInspect;
 }

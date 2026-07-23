@@ -66,6 +66,27 @@ func (k Keys) UploadTokenMatch(raw, wantHash string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
 }
 
+// SignFileUnlock returns a hex HMAC payload "fileID|unixExpiry" for unlock cookies.
+func (k Keys) SignFileUnlock(fileID string, expiresUnix int64) string {
+	msg := fmt.Sprintf("%s|%d", fileID, expiresUnix)
+	return hex.EncodeToString(hmacSHA256(k.File, []byte("unlock\x00"+msg))) + "." + fmt.Sprintf("%d", expiresUnix)
+}
+
+// FileUnlockMatch reports whether cookieVal is a valid unlock signature for fileID at now.
+func (k Keys) FileUnlockMatch(fileID, cookieVal string, nowUnix int64) bool {
+	dot := strings.LastIndexByte(cookieVal, '.')
+	if dot <= 0 || dot == len(cookieVal)-1 {
+		return false
+	}
+	sig, expStr := cookieVal[:dot], cookieVal[dot+1:]
+	var exp int64
+	if _, err := fmt.Sscanf(expStr, "%d", &exp); err != nil || exp < nowUnix {
+		return false
+	}
+	want := hex.EncodeToString(hmacSHA256(k.File, []byte(fmt.Sprintf("unlock\x00%s|%d", fileID, exp))))
+	return subtle.ConstantTimeCompare([]byte(sig), []byte(want)) == 1
+}
+
 // GenerateFileToken returns 32 random bytes as raw URL-safe base64 (no padding).
 func GenerateFileToken() (string, error) {
 	b := make([]byte, 32)

@@ -325,10 +325,17 @@ type fileAccess struct {
 	File     store.File
 	User     *store.User
 	ViaToken bool
+	Manager  bool // owner or admin — skip password + download cap
 }
 
+var (
+	errPasswordRequired = errors.New("password required")
+	errPasswordInvalid  = errors.New("password invalid")
+)
+
 // authorizeFileAccess is the single gate for all file-read paths.
-// Denials are uniform 404 (ErrNotFound). Invalid ids are errInvalidID (400).
+// Visibility/token denials are uniform 404 (ErrNotFound). Invalid ids are errInvalidID (400).
+// Password failures are errPasswordRequired / errPasswordInvalid (401).
 func (s *Server) authorizeFileAccess(r *http.Request, id string) (fileAccess, error) {
 	parsed, err := parseID(id)
 	if err != nil {
@@ -348,27 +355,60 @@ func (s *Server) authorizeFileAccess(r *http.Request, id string) (fileAccess, er
 		userPtr = &u
 	}
 
-	if f.Visibility == store.VisibilityPublic || f.Visibility == "" {
-		return fileAccess{File: f, User: userPtr}, nil
-	}
+	access := fileAccess{File: f, User: userPtr}
+	allowed := false
 
+	if f.Visibility == store.VisibilityPublic || f.Visibility == "" {
+		allowed = true
+	}
 	if userPtr != nil {
 		if userPtr.Role == store.RoleAdmin {
-			return fileAccess{File: f, User: userPtr}, nil
+			allowed = true
+			access.Manager = true
+		} else if f.OwnerUserID != nil && *f.OwnerUserID == userPtr.ID {
+			allowed = true
+			access.Manager = true
 		}
-		if f.OwnerUserID != nil && *f.OwnerUserID == userPtr.ID {
-			return fileAccess{File: f, User: userPtr}, nil
+	}
+	if !allowed {
+		raw := r.URL.Query().Get("token")
+		if raw == "" {
+			raw = r.Header.Get("X-File-Token")
 		}
+		if raw != "" && f.AccessTokenHash != "" && s.keys.FileTokenMatch(raw, f.AccessTokenHash) {
+			allowed = true
+			access.ViaToken = true
+		}
+	}
+	if !allowed {
+		return fileAccess{}, store.ErrNotFound
 	}
 
-	raw := r.URL.Query().Get("token")
-	if raw == "" {
-		raw = r.Header.Get("X-File-Token")
+	if f.PasswordHash != "" && !access.Manager {
+		if err := s.checkFilePassword(r, f); err != nil {
+			return fileAccess{}, err
+		}
 	}
-	if raw != "" && f.AccessTokenHash != "" && s.keys.FileTokenMatch(raw, f.AccessTokenHash) {
-		return fileAccess{File: f, User: userPtr, ViaToken: true}, nil
+	return access, nil
+}
+
+func (s *Server) checkFilePassword(r *http.Request, f store.File) error {
+	if pw := r.Header.Get(filePasswordHeader); pw != "" {
+		if auth.VerifyPassword(f.PasswordHash, pw) {
+			return nil
+		}
+		return errPasswordInvalid
 	}
-	return fileAccess{}, store.ErrNotFound
+	if c, err := r.Cookie(fileUnlockCookieName(f.ID)); err == nil && c.Value != "" {
+		if s.keys.FileUnlockMatch(f.ID, c.Value, s.now().UTC().Unix()) {
+			return nil
+		}
+	}
+	return errPasswordRequired
+}
+
+func fileUnlockCookieName(fileID string) string {
+	return "discloud_unlock_" + fileID
 }
 
 func (s *Server) canManageFile(u store.User, f store.File) bool {

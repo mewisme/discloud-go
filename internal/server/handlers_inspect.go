@@ -22,6 +22,10 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "Cannot find the specified file")
 		return
 	}
+	if errors.Is(err, errPasswordRequired) || errors.Is(err, errPasswordInvalid) {
+		writePasswordError(w, err)
+		return
+	}
 	if err != nil {
 		s.log.Error("inspect failed", "id", id, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
@@ -62,6 +66,10 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		"visibility":         info.Visibility,
 		"status":             fileStatusOrReady(info.Status),
 		"ownedByCurrentUser": links["ownedByCurrentUser"],
+		"passwordProtected":  links["passwordProtected"],
+		"shareMode":          links["shareMode"],
+		"maxDownloads":       links["maxDownloads"],
+		"downloadCount":      links["downloadCount"],
 		"views":              info.Views,
 		"downloads":          info.Downloads,
 		"ranges":             info.Ranges,
