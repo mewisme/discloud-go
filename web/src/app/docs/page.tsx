@@ -182,10 +182,14 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
 
         <TabsContent value="auth" className="flex flex-col gap-4">
           <SectionIntro title="Auth">
-            Cookie session. Username is immutable after signup (3–32 chars,{" "}
-            <code>[a-z0-9][a-z0-9_-]*</code>). First signup on a fresh DB
-            becomes <code>admin</code>; later accounts are <code>user</code>.
-            Password min 8 chars.
+            Cookie session or personal access token (
+            <code>Authorization: Bearer dc_…</code>). Username is immutable
+            after signup (3–32 chars, <code>[a-z0-9][a-z0-9_-]*</code>). First
+            signup on a fresh DB becomes <code>admin</code>; later accounts are{" "}
+            <code>user</code>. Password min 8 chars. Cookie sessions have full
+            access; Bearer tokens are limited to their scopes (
+            <code>upload</code>, <code>read</code>, <code>manage</code>,{" "}
+            <code>admin</code>).
           </SectionIntro>
 
           <Endpoint method="POST" path="/api/auth/signup">
@@ -212,7 +216,9 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
             <p>
               Account dashboard payload: identity, preferences, file stats,
               current session metadata, and retention constants. 401 if not
-              signed in. Touches session <code>lastSeenAt</code>.
+              signed in. Touches session <code>lastSeenAt</code>. With a Bearer
+              token, <code>session.auth</code> is <code>&quot;bearer&quot;</code>{" "}
+              plus <code>scopes</code>.
             </p>
             <DocsCode>{`curl -s -b cookies.txt "$BASE/api/auth/me"
 # → {
@@ -226,7 +232,7 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
 
           <Endpoint method="PATCH" path="/api/auth/preferences">
             <p>
-              Requires session. Body:{" "}
+              Requires cookie or Bearer with <code>manage</code>. Body:{" "}
               <code>{`{"defaultVisibility":"public"|"private"}`}</code>. Applies
               to new owned uploads (not existing files).
             </p>
@@ -237,13 +243,40 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
 
           <Endpoint method="POST" path="/api/auth/password">
             <p>
-              Requires session. Body:{" "}
+              Requires cookie or Bearer with <code>manage</code>. Body:{" "}
               <code>{`{"currentPassword","newPassword"}`}</code>. 204. Revokes
-              all sessions and re-issues a cookie for this request.
+              all sessions and API tokens, then re-issues a cookie for this
+              request.
             </p>
             <DocsCode>{`curl -X POST -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
   -b cookies.txt -d '{"currentPassword":"secret123","newPassword":"secret456"}' \\
   "$BASE/api/auth/password"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="POST" path="/api/auth/tokens">
+            <p>
+              Create a PAT. Requires cookie or Bearer with <code>manage</code>.
+              Body:{" "}
+              <code>{`{"name","scopes":["upload","read","manage"],"expiresAt"?}`}</code>
+              . Raw <code>token</code> returned once. Max 20 tokens / user;
+              expiry optional (max 1 year).
+            </p>
+            <DocsCode>{`curl -X POST -H "Content-Type: application/json" -H "Origin: http://localhost:3000" \\
+  -b cookies.txt -d '{"name":"ci","scopes":["upload","read","manage"]}' \\
+  "$BASE/api/auth/tokens"
+# → { "id", "name", "scopes", "expiresAt", "token":"dc_…", "createdAt" }`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="GET" path="/api/auth/tokens">
+            <p>List active token metadata (no secrets).</p>
+            <DocsCode>{`curl -s -b cookies.txt "$BASE/api/auth/tokens"
+# → { "tokens": [{ "id", "name", "scopes", "expiresAt", "lastUsedAt", "createdAt" }] }`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="DELETE" path="/api/auth/tokens/{id}">
+            <p>Revoke a token. 204. Bearer-only calls may omit Origin.</p>
+            <DocsCode>{`curl -X DELETE -H "Authorization: Bearer dc_…" \\
+  "$BASE/api/auth/tokens/$TOKEN_ID"`}</DocsCode>
           </Endpoint>
         </TabsContent>
 

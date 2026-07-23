@@ -296,6 +296,45 @@ export async function changePassword(
   });
 }
 
+export type APITokenScope = "upload" | "read" | "manage" | "admin";
+
+export type APITokenMeta = {
+  id: string;
+  name: string;
+  scopes: APITokenScope[];
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  createdAt: string;
+};
+
+export type APITokenCreated = APITokenMeta & {
+  token: string;
+};
+
+export async function listAPITokens(): Promise<APITokenMeta[]> {
+  const body = await apiFetch<{ tokens: APITokenMeta[] }>("/api/auth/tokens");
+  return body.tokens ?? [];
+}
+
+export async function createAPIToken(input: {
+  name: string;
+  scopes: APITokenScope[];
+  expiresAt?: string;
+}): Promise<APITokenCreated> {
+  return apiFetch<APITokenCreated>("/api/auth/tokens", {
+    method: "POST",
+    json: {
+      name: input.name,
+      scopes: input.scopes,
+      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+    },
+  });
+}
+
+export async function revokeAPIToken(id: string): Promise<void> {
+  await apiFetch<void>(`/api/auth/tokens/${id}`, { method: "DELETE" });
+}
+
 export async function updatePreferences(prefs: {
   defaultVisibility: Visibility;
 }): Promise<{ preferences: { defaultVisibility: Visibility } }> {

@@ -822,6 +822,9 @@ func TestCleanupExpiredAndCORS(t *testing.T) {
 	if opt.Header.Get("Access-Control-Allow-Credentials") != "true" {
 		t.Fatal("missing Allow-Credentials")
 	}
+	if !strings.Contains(opt.Header.Get("Access-Control-Allow-Methods"), "PUT") {
+		t.Fatalf("Allow-Methods missing PUT: %q", opt.Header.Get("Access-Control-Allow-Methods"))
+	}
 
 	// Wrong Origin on mutating + cookie → 403.
 	cookie, _ := e.signup(t, "corsuser", "password1")

@@ -175,7 +175,8 @@ Compose injects `DATABASE_URL` and `VALKEY_URL` for containers. Set them yoursel
 | Variable | Description |
 | --- | --- |
 | `DISCLOUD_BASE` | API origin |
-| `DISCLOUD_ORIGIN` | Must match server `WEB_ORIGIN` (CSRF) |
+| `DISCLOUD_ORIGIN` | Must match server `WEB_ORIGIN` (CSRF) when using cookie login |
+| `DISCLOUD_TOKEN` | Personal access token (`dc_…`); Bearer auth, no cookie/Origin needed |
 
 Resolution: env → `config.json` → `http://localhost:8080` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. See `discloud config --help`.
 
@@ -189,6 +190,7 @@ Resolution: env → `config.json` → `http://localhost:8080` / `http://localhos
 | Download extend | +7d (cap 30d from now) |
 | Upload session TTL | anon 24h / auth 48h |
 | Max open upload sessions | 20 |
+| Max API tokens / user | 20 |
 | Auth rate limit | 10 / 15m |
 
 ## Usage
@@ -209,6 +211,31 @@ discloud files list
 discloud files share <id> --password 'secret-pass' --mode view --max-downloads 10
 discloud files revoke <id> -y
 discloud get <file-id> --password 'secret-pass' --download --out ./downloaded.bin
+```
+
+### Automation (API tokens)
+
+Create a PAT (cookie session or another `manage`-scoped token), then use Bearer auth:
+
+```bash
+discloud auth login
+discloud auth token create --name ci --scopes upload,read,manage
+discloud config set --token          # prompts for dc_… (same as: config set token)
+# or: export DISCLOUD_TOKEN=dc_…
+discloud upload ./artifact.bin      # no cookie jar / Origin required
+discloud auth token list
+discloud auth token info            # validate config/env token (alias: validate)
+discloud auth token revoke <id> -y
+discloud config unset token
+```
+
+Scopes: `upload` | `read` | `manage` | `admin` (`admin` also needs the admin role). Cookie sessions keep full access. Raw token is shown once at create; server stores an HMAC hash only.
+
+HTTP:
+
+```bash
+curl -H "Authorization: Bearer dc_…" -X POST "$API/api/uploads" -H 'Content-Type: application/json' \
+  -d '{"fileName":"a.bin","fileSize":123}'
 ```
 
 ### Upload sessions (HTTP)

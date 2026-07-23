@@ -43,3 +43,29 @@ func (c *Client) ChangePassword(current, next string) error {
 		"newPassword":     next,
 	}, nil)
 }
+
+// CreateAPIToken creates a PAT. Raw token is returned once in the response.
+func (c *Client) CreateAPIToken(name string, scopes []string, expiresAt string) (map[string]any, error) {
+	body := map[string]any{
+		"name":   name,
+		"scopes": scopes,
+	}
+	if expiresAt != "" {
+		body["expiresAt"] = expiresAt
+	}
+	var out map[string]any
+	err := c.DoJSON(http.MethodPost, "/api/auth/tokens", body, &out)
+	return out, err
+}
+
+// ListAPITokens returns token metadata (no secrets).
+func (c *Client) ListAPITokens() (map[string]any, error) {
+	var out map[string]any
+	err := c.DoJSON(http.MethodGet, "/api/auth/tokens", nil, &out)
+	return out, err
+}
+
+// RevokeAPIToken revokes a PAT by id (204).
+func (c *Client) RevokeAPIToken(id string) error {
+	return c.DoJSON(http.MethodDelete, "/api/auth/tokens/"+id, nil, nil)
+}

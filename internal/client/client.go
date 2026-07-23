@@ -23,21 +23,25 @@ type Config struct {
 	BaseURL    string // API origin, e.g. http://localhost:8080
 	Origin     string // WEB_ORIGIN for CSRF, e.g. http://localhost:3000
 	CookiePath string // cookie jar file; empty → default path
+	Token      string // personal access token (Bearer); env DISCLOUD_TOKEN / config.json
 }
 
 // DefaultConfig resolves settings in order:
-// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN) → config.json → localhost defaults.
+// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN / DISCLOUD_TOKEN) → config.json → localhost defaults.
 // CLI flags (--base / --origin) override after this when set by the caller.
 func DefaultConfig() Config {
 	envBase := os.Getenv("DISCLOUD_BASE")
 	envOrigin := os.Getenv("DISCLOUD_ORIGIN")
-	fileBase, fileOrigin := loadConfigFile()
+	envToken := os.Getenv("DISCLOUD_TOKEN")
+	fileBase, fileOrigin, fileToken := loadConfigFile()
 	base := firstNonEmpty(envBase, fileBase, "http://localhost:8080")
 	origin := firstNonEmpty(envOrigin, fileOrigin, "http://localhost:3000")
+	token := firstNonEmpty(envToken, fileToken)
 	return Config{
 		BaseURL:    strings.TrimRight(base, "/"),
 		Origin:     strings.TrimRight(origin, "/"),
 		CookiePath: defaultCookiePath(),
+		Token:      strings.TrimSpace(token),
 	}
 }
 
@@ -77,45 +81,84 @@ func ConfigFilePath() string {
 type configFile struct {
 	Base   string `json:"base"`
 	Origin string `json:"origin"`
+	Token  string `json:"token,omitempty"`
 }
 
-func loadConfigFile() (base, origin string) {
+func loadConfigFile() (base, origin, token string) {
 	data, err := os.ReadFile(ConfigFilePath())
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	var f configFile
 	if json.Unmarshal(data, &f) != nil {
-		return "", ""
+		return "", "", ""
 	}
-	return f.Base, f.Origin
+	return f.Base, f.Origin, f.Token
 }
 
 // SaveConfigFile merges non-empty base/origin into config.json and writes it.
-// Empty fields keep the previous file values (or stay empty).
+// Empty fields keep the previous file values (or stay empty). Token is preserved.
 // Returns the path and the values that were written.
 func SaveConfigFile(base, origin string) (path, savedBase, savedOrigin string, err error) {
+	path, savedBase, savedOrigin, _, err = SaveConfigFileOpts(base, origin, "", false)
+	return path, savedBase, savedOrigin, err
+}
+
+// SaveConfigFileOpts is SaveConfigFile plus optional token update.
+// When setToken is true, token is written as-is (empty clears the stored token).
+func SaveConfigFileOpts(base, origin, token string, setToken bool) (path, savedBase, savedOrigin, savedToken string, err error) {
 	path = ConfigFilePath()
-	curBase, curOrigin := loadConfigFile()
+	curBase, curOrigin, curToken := loadConfigFile()
 	f := configFile{
 		Base:   firstNonEmpty(strings.TrimRight(strings.TrimSpace(base), "/"), curBase),
 		Origin: firstNonEmpty(strings.TrimRight(strings.TrimSpace(origin), "/"), curOrigin),
+		Token:  curToken,
 	}
-	if f.Base == "" && f.Origin == "" {
-		return "", "", "", fmt.Errorf("nothing to write: pass --base and/or --origin")
+	if setToken {
+		f.Token = strings.TrimSpace(token)
 	}
+	if f.Base == "" && f.Origin == "" && !setToken {
+		return "", "", "", "", fmt.Errorf("nothing to write: pass --base and/or --origin")
+	}
+	if err := writeConfigFile(path, f); err != nil {
+		return "", "", "", "", err
+	}
+	return path, f.Base, f.Origin, f.Token, nil
+}
+
+// UnsetConfigFile clears the named fields in config.json (others kept).
+func UnsetConfigFile(clearBase, clearOrigin, clearToken bool) (path string, err error) {
+	if !clearBase && !clearOrigin && !clearToken {
+		return "", fmt.Errorf("nothing to unset: pass base, origin, and/or token")
+	}
+	path = ConfigFilePath()
+	curBase, curOrigin, curToken := loadConfigFile()
+	f := configFile{Base: curBase, Origin: curOrigin, Token: curToken}
+	if clearBase {
+		f.Base = ""
+	}
+	if clearOrigin {
+		f.Origin = ""
+	}
+	if clearToken {
+		f.Token = ""
+	}
+	if err := writeConfigFile(path, f); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func writeConfigFile(path string, f configFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", "", "", err
+		return err
 	}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return "", "", "", err
+		return err
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", "", "", err
-	}
-	return path, f.Base, f.Origin, nil
+	return os.WriteFile(path, data, 0o600)
 }
 
 // Error is an API error with HTTP status and message body.
@@ -167,8 +210,11 @@ func New(cfg Config) (*Client, error) {
 		base: u,
 		http: &http.Client{Jar: jar},
 	}
-	if err := c.loadCookies(); err != nil {
-		return nil, err
+	// PAT mode: never load or send session cookies (cookie would win on the server).
+	if strings.TrimSpace(cfg.Token) == "" {
+		if err := c.loadCookies(); err != nil {
+			return nil, err
+		}
 	}
 	return c, nil
 }
@@ -178,35 +224,10 @@ func (c *Client) Config() Config { return c.cfg }
 
 // Do performs an HTTP request against the API.
 // Mutating methods with a session cookie send Origin for CSRF.
+// When Token is set, sends Authorization: Bearer and omits Origin (Bearer-only CSRF path).
 // path may include a query string (e.g. "/api/upload?fileName=x").
 func (c *Client) Do(method, path string, body io.Reader, contentType string) (*http.Response, error) {
-	ref, err := url.Parse(path)
-	if err != nil {
-		return nil, err
-	}
-	u := c.base.ResolveReference(ref)
-	req, err := http.NewRequest(method, u.String(), body)
-	if err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	req.Header.Set("User-Agent", "discloud-cli")
-	mutating := method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
-	if mutating {
-		// Match docs curl: Origin must equal WEB_ORIGIN when present or when a session cookie is sent.
-		req.Header.Set("Origin", c.cfg.Origin)
-	}
-	res, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.saveCookies(); err != nil {
-		res.Body.Close()
-		return nil, err
-	}
-	return res, nil
+	return c.doWithHeaders(method, path, body, contentType, nil)
 }
 
 // DoJSON sends JSON and decodes a JSON response into dst (nil ok for 204).
@@ -252,20 +273,31 @@ func (c *Client) doWithHeaders(method, path string, body io.Reader, contentType 
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", "discloud-cli")
+	useBearer := strings.TrimSpace(c.cfg.Token) != ""
+	if useBearer {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.cfg.Token))
+	}
 	mutating := method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
-	if mutating {
+	if mutating && !useBearer {
 		req.Header.Set("Origin", c.cfg.Origin)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	res, err := c.http.Do(req)
+	httpClient := c.http
+	if useBearer {
+		// No cookie jar — Bearer-only CSRF path (session cookie would require Origin).
+		httpClient = &http.Client{Timeout: c.http.Timeout, Transport: c.http.Transport}
+	}
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.saveCookies(); err != nil {
-		res.Body.Close()
-		return nil, err
+	if !useBearer {
+		if err := c.saveCookies(); err != nil {
+			res.Body.Close()
+			return nil, err
+		}
 	}
 	return res, nil
 }

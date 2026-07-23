@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mewisme/discloud-go/internal/auth"
@@ -104,26 +105,39 @@ func (s *Server) handleSignout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil || c.Value == "" {
+	p, ok := s.currentUser(r)
+	if !ok {
 		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
 		return
 	}
+	u := p.User
 	now := s.now().UTC()
-	tokenHash := s.keys.HashSessionToken(c.Value)
-	u, err := s.store.GetUserBySessionHash(r.Context(), tokenHash, now)
-	if err != nil {
-		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
-		return
-	}
 	ip := s.clientIP(r)
 	ua := r.Header.Get("User-Agent")
-	_ = s.store.TouchSession(r.Context(), tokenHash, ip, ua, now)
-	sess, err := s.store.GetSessionByTokenHash(r.Context(), tokenHash, now)
-	if err != nil {
-		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
-		return
+
+	var sessionDTO map[string]any
+	if !p.ViaBearer {
+		c, err := r.Cookie(sessionCookieName)
+		if err == nil && c.Value != "" {
+			tokenHash := s.keys.HashSessionToken(c.Value)
+			_ = s.store.TouchSession(r.Context(), tokenHash, ip, ua, now)
+			if sess, err := s.store.GetSessionByTokenHash(r.Context(), tokenHash, now); err == nil {
+				sessionDTO = map[string]any{
+					"createdAt":  sess.CreatedAt,
+					"lastSeenAt": sess.LastSeenAt,
+					"expiresAt":  sess.ExpiresAt,
+					"ip":         sess.IP,
+					"userAgent":  sess.UserAgent,
+				}
+			}
+		}
+	} else {
+		sessionDTO = map[string]any{
+			"auth":   "bearer",
+			"scopes": p.Scopes,
+		}
 	}
+
 	stats, err := s.store.OwnerFileStats(r.Context(), u.ID, now, 7*24*time.Hour)
 	if err != nil {
 		s.log.Error("owner stats failed", "user", u.ID, "error", err)
@@ -134,7 +148,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if defVis == "" {
 		defVis = store.VisibilityPublic
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"id":                u.ID,
 		"username":          u.Username,
 		"role":              u.Role,
@@ -147,13 +161,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			"privateCount":      stats.PrivateCount,
 			"expiringSoonCount": stats.ExpiringSoonCount,
 		},
-		"session": map[string]any{
-			"createdAt":  sess.CreatedAt,
-			"lastSeenAt": sess.LastSeenAt,
-			"expiresAt":  sess.ExpiresAt,
-			"ip":         sess.IP,
-			"userAgent":  sess.UserAgent,
-		},
 		"retention": map[string]any{
 			"authenticatedDays":     int(authenticatedRetention / (24 * time.Hour)),
 			"anonymousDays":         int(anonymousRetention / (24 * time.Hour)),
@@ -163,11 +170,26 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"preferences": map[string]any{
 			"defaultVisibility": defVis,
 		},
-	})
+	}
+	if sessionDTO != nil {
+		out["session"] = sessionDTO
+	}
+	if p.ViaBearer {
+		out["token"] = map[string]any{
+			"id":         p.TokenID,
+			"name":       p.TokenName,
+			"scopes":     p.Scopes,
+			"expiresAt":  p.TokenExp,
+			"lastUsedAt": p.TokenUsed,
+			"createdAt":  p.TokenAt,
+			"valid":      true,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}
@@ -196,7 +218,7 @@ func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}
@@ -232,6 +254,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	_ = s.store.RevokeAPITokensByUser(r.Context(), u.ID, s.now().UTC())
 	u.PasswordHash = hash
 	if err := s.issueSession(w, r, u); err != nil {
 		s.log.Error("reissue session failed", "user", u.ID, "error", err)
@@ -283,25 +306,136 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, u store.Us
 	return nil
 }
 
-func (s *Server) sessionUser(r *http.Request) (store.User, bool) {
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil || c.Value == "" {
-		return store.User{}, false
+// authPrincipal is the resolved caller (cookie session or PAT).
+type authPrincipal struct {
+	User      store.User
+	ViaBearer bool
+	Scopes    []string // empty when cookie → all scopes
+	TokenID   string
+	TokenName string
+	TokenExp  *time.Time
+	TokenUsed *time.Time
+	TokenAt   time.Time
+}
+
+func (p authPrincipal) hasScope(scope string) bool {
+	if !p.ViaBearer {
+		return true
 	}
-	u, err := s.store.GetUserBySessionHash(r.Context(), s.keys.HashSessionToken(c.Value), s.now().UTC())
+	for _, s := range p.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
+}
+
+func bearerRaw(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(h) < len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(h[len(prefix):])
+}
+
+// currentUser resolves cookie session first, then Authorization: Bearer dc_….
+func (s *Server) currentUser(r *http.Request) (authPrincipal, bool) {
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		u, err := s.store.GetUserBySessionHash(r.Context(), s.keys.HashSessionToken(c.Value), s.now().UTC())
+		if err == nil {
+			return authPrincipal{User: u}, true
+		}
+	}
+	raw := bearerRaw(r)
+	if raw == "" || !strings.HasPrefix(raw, "dc_") {
+		return authPrincipal{}, false
+	}
+	tok, err := s.store.GetAPITokenByHash(r.Context(), s.keys.HashAPIToken(raw))
+	if err != nil || tok.RevokedAt != nil {
+		return authPrincipal{}, false
+	}
+	now := s.now().UTC()
+	if tok.ExpiresAt != nil && !tok.ExpiresAt.After(now) {
+		return authPrincipal{}, false
+	}
+	u, err := s.store.GetUserByID(r.Context(), tok.UserID)
 	if err != nil {
+		return authPrincipal{}, false
+	}
+	if tok.LastUsedAt == nil || now.Sub(*tok.LastUsedAt) >= apiTokenTouchEvery {
+		id := tok.ID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = s.store.TouchAPITokenLastUsed(ctx, id, now)
+		}()
+	}
+	return authPrincipal{
+		User:      u,
+		ViaBearer: true,
+		Scopes:    tok.Scopes,
+		TokenID:   tok.ID,
+		TokenName: tok.Name,
+		TokenExp:  tok.ExpiresAt,
+		TokenUsed: tok.LastUsedAt,
+		TokenAt:   tok.CreatedAt,
+	}, true
+}
+
+// sessionUser is the identity used for ownership (uploads, file access).
+func (s *Server) sessionUser(r *http.Request) (store.User, bool) {
+	p, ok := s.currentUser(r)
+	if !ok {
 		return store.User{}, false
 	}
-	return u, true
+	return p.User, true
 }
 
 func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (store.User, bool) {
-	u, ok := s.sessionUser(r)
+	p, ok := s.currentUser(r)
 	if !ok {
 		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
 		return store.User{}, false
 	}
-	return u, true
+	return p.User, true
+}
+
+// requireScope requires a signed-in user; cookie grants all scopes, Bearer must include scope.
+func (s *Server) requireScope(w http.ResponseWriter, r *http.Request, scope string) (store.User, bool) {
+	p, ok := s.currentUser(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "Not signed in")
+		return store.User{}, false
+	}
+	if !p.hasScope(scope) {
+		writeJSONError(w, http.StatusForbidden, "Missing required scope: "+scope)
+		return store.User{}, false
+	}
+	if scope == store.ScopeAdmin && p.User.Role != store.RoleAdmin {
+		writeJSONError(w, http.StatusForbidden, "Admin role required")
+		return store.User{}, false
+	}
+	return p.User, true
+}
+
+// allowUploadAuth permits anonymous access, but rejects Bearer without upload scope
+// and rejects invalid Bearer credentials (so they cannot silently fall back to anon).
+func (s *Server) allowUploadAuth(w http.ResponseWriter, r *http.Request) bool {
+	raw := bearerRaw(r)
+	if raw == "" {
+		return true
+	}
+	p, ok := s.currentUser(r)
+	if !ok || !p.ViaBearer {
+		writeJSONError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return false
+	}
+	if !p.hasScope(store.ScopeUpload) {
+		writeJSONError(w, http.StatusForbidden, "Missing required scope: upload")
+		return false
+	}
+	return true
 }
 
 func (s *Server) allowAuth(r *http.Request, kind string) bool {
@@ -351,8 +485,12 @@ func (s *Server) authorizeFileAccess(r *http.Request, id string) (fileAccess, er
 	}
 
 	var userPtr *store.User
-	if u, ok := s.sessionUser(r); ok {
-		userPtr = &u
+	if p, ok := s.currentUser(r); ok {
+		// Cookie → full access. Bearer needs read to use owner/admin identity on get/inspect.
+		if !p.ViaBearer || p.hasScope(store.ScopeRead) {
+			u := p.User
+			userPtr = &u
+		}
 	}
 
 	access := fileAccess{File: f, User: userPtr}
@@ -419,7 +557,7 @@ func (s *Server) canManageFile(u store.User, f store.File) bool {
 }
 
 func (s *Server) handleVisibility(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}
@@ -485,7 +623,7 @@ func (s *Server) handleVisibility(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}
@@ -523,7 +661,7 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}

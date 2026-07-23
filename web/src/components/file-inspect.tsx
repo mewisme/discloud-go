@@ -149,32 +149,34 @@ export function FileInspectPanel({
 
   if (needPassword) {
     return (
-      <Card className="max-w-md">
-        <CardContent className="flex flex-col gap-4 py-6">
-          <div>
-            <h1 className="text-lg font-semibold">Password required</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              This share is password-protected. Enter the password to continue.
-            </p>
-          </div>
-          <form onSubmit={onUnlock} className="flex flex-col gap-3">
-            <Field>
-              <FieldLabel htmlFor="share-password">Password</FieldLabel>
-              <Input
-                id="share-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(ev) => setPassword(ev.target.value)}
-                required
-              />
-            </Field>
-            <Button type="submit" disabled={unlockBusy || !password}>
-              {unlockBusy ? "Unlocking…" : "Unlock"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="flex flex-col gap-4 py-6">
+            <div>
+              <h1 className="text-lg font-semibold">Password required</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                This share is password-protected. Enter the password to continue.
+              </p>
+            </div>
+            <form onSubmit={onUnlock} className="flex flex-col gap-3">
+              <Field>
+                <FieldLabel htmlFor="share-password">Password</FieldLabel>
+                <Input
+                  id="share-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(ev) => setPassword(ev.target.value)}
+                  required
+                />
+              </Field>
+              <Button type="submit" disabled={unlockBusy || !password}>
+                {unlockBusy ? "Unlocking…" : "Unlock"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 

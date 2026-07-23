@@ -21,6 +21,11 @@ const (
 	fileUnlockTTL      = time.Hour
 	filePasswordHeader = "X-File-Password"
 
+	maxAPITokensPerUser = 20
+	maxAPITokenNameLen  = 64
+	maxAPITokenTTL      = 365 * 24 * time.Hour
+	apiTokenTouchEvery  = time.Hour
+
 	sessionCookieName = "discloud_session"
 	uploadTokenHeader = "X-Upload-Token"
 

@@ -47,6 +47,9 @@ func (s *Server) discordUploadLimit() int {
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	if !s.allowUploadAuth(w, r) {
+		return
+	}
 	rawName := r.URL.Query().Get("fileName")
 	if rawName == "" {
 		writeJSONError(w, http.StatusBadRequest, "Missing fileName query param")
@@ -346,7 +349,7 @@ func (s *Server) streamPart(w http.ResponseWriter, r *http.Request, part store.F
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeRead)
 	if !ok {
 		return
 	}

@@ -20,6 +20,7 @@ type Keys struct {
 	Session []byte
 	File    []byte
 	Upload  []byte
+	API     []byte
 	CSRF    []byte // reserved; Origin check is the primary CSRF defense
 }
 
@@ -29,6 +30,7 @@ func DeriveKeys(appSecret string) Keys {
 		Session: hmacSHA256([]byte(appSecret), []byte("discloud/session-token/v1")),
 		File:    hmacSHA256([]byte(appSecret), []byte("discloud/file-token/v1")),
 		Upload:  hmacSHA256([]byte(appSecret), []byte("discloud/upload-token/v1")),
+		API:     hmacSHA256([]byte(appSecret), []byte("discloud/api-token/v1")),
 		CSRF:    hmacSHA256([]byte(appSecret), []byte("discloud/csrf/v1")),
 	}
 }
@@ -64,6 +66,26 @@ func (k Keys) HashUploadToken(raw string) string {
 func (k Keys) UploadTokenMatch(raw, wantHash string) bool {
 	got := k.HashUploadToken(raw)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
+}
+
+// HashAPIToken returns a hex-encoded HMAC of the raw personal access token.
+func (k Keys) HashAPIToken(raw string) string {
+	return hex.EncodeToString(hmacSHA256(k.API, []byte(raw)))
+}
+
+// APITokenMatch reports whether raw hashes to wantHash (constant-time).
+func (k Keys) APITokenMatch(raw, wantHash string) bool {
+	got := k.HashAPIToken(raw)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
+}
+
+// GenerateAPIToken returns a raw PAT with dc_ prefix (32 random bytes, base64url).
+func GenerateAPIToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate api token: %w", err)
+	}
+	return "dc_" + base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // SignFileUnlock returns a hex HMAC payload "fileID|unixExpiry" for unlock cookies.

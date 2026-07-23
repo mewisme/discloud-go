@@ -65,6 +65,19 @@ type MeSession struct {
 	IP         string    `json:"ip,omitempty"`
 	UserAgent  string    `json:"userAgent,omitempty"`
 	ExpiresAt  time.Time `json:"expiresAt,omitempty"`
+	Auth       string    `json:"auth,omitempty"`
+	Scopes     []string  `json:"scopes,omitempty"`
+}
+
+// MeToken is Bearer PAT metadata from GET /api/auth/me.
+type MeToken struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Scopes     []string   `json:"scopes"`
+	ExpiresAt  *time.Time `json:"expiresAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	Valid      bool       `json:"valid"`
 }
 
 // MeResponse is GET /api/auth/me.
@@ -76,6 +89,7 @@ type MeResponse struct {
 	PasswordChangedAt time.Time `json:"passwordChangedAt,omitempty"`
 	Stats             MeStats   `json:"stats"`
 	Session           MeSession `json:"session"`
+	Token             *MeToken  `json:"token,omitempty"`
 	Preferences       struct {
 		DefaultVisibility string `json:"defaultVisibility"`
 	} `json:"preferences"`

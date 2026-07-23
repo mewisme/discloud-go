@@ -59,6 +59,13 @@ type Store interface {
 	UpdateFileShare(ctx context.Context, id string, p store.FileSharePatch) error
 	IncrementDownloadCount(ctx context.Context, id string) error
 	RevokeFile(ctx context.Context, id string, now time.Time) error
+	CreateAPIToken(ctx context.Context, t store.APIToken) error
+	GetAPITokenByHash(ctx context.Context, tokenHash string) (store.APIToken, error)
+	ListAPITokensByUser(ctx context.Context, userID string) ([]store.APIToken, error)
+	RevokeAPIToken(ctx context.Context, id, userID string, now time.Time) error
+	RevokeAPITokensByUser(ctx context.Context, userID string, now time.Time) error
+	TouchAPITokenLastUsed(ctx context.Context, id string, now time.Time) error
+	CountAPITokensByUser(ctx context.Context, userID string) (int64, error)
 	Ping(ctx context.Context) error
 }
 
@@ -134,6 +141,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
 	mux.HandleFunc("PATCH /api/auth/preferences", s.handleUpdatePreferences)
 	mux.HandleFunc("POST /api/auth/password", s.handleChangePassword)
+	mux.HandleFunc("POST /api/auth/tokens", s.handleCreateAPIToken)
+	mux.HandleFunc("GET /api/auth/tokens", s.handleListAPITokens)
+	mux.HandleFunc("DELETE /api/auth/tokens/{id}", s.handleRevokeAPIToken)
 	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/chunks/{hash}", s.handleChunkCheck)
 	mux.HandleFunc("POST /api/chunks", s.handleChunkUpload)
@@ -238,8 +248,8 @@ func (s *Server) withCORSAndCSRF(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", s.webOrigin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Range, X-File-Token, X-File-Password, X-Upload-Token")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Range, Authorization, X-File-Token, X-File-Password, X-Upload-Token")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -248,11 +258,14 @@ func (s *Server) withCORSAndCSRF(next http.Handler) http.Handler {
 
 		// CSRF: only mutating methods. GET/HEAD navigations often send a
 		// session cookie with no Origin; requiring Origin there 403s public /f/{id}.
+		// Bearer-only (no session cookie) skips Origin — PATs are not browser cookies.
 		mutating := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
 		if mutating {
 			_, cookieErr := r.Cookie(sessionCookieName)
 			hasCookie := cookieErr == nil
-			if (hasCookie || origin != "") && origin != s.webOrigin {
+			rawBearer := bearerRaw(r)
+			bearerOnly := !hasCookie && strings.HasPrefix(rawBearer, "dc_")
+			if !bearerOnly && (hasCookie || origin != "") && origin != s.webOrigin {
 				writeJSONError(w, http.StatusForbidden, "Origin not allowed")
 				return
 			}

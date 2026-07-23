@@ -39,7 +39,7 @@ func writePasswordErrorPlain(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) handleShareSettings(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}
@@ -216,7 +216,7 @@ func (s *Server) handleUnlockFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRevokeFile(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireUser(w, r)
+	u, ok := s.requireScope(w, r, store.ScopeManage)
 	if !ok {
 		return
 	}

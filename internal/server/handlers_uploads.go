@@ -13,6 +13,9 @@ import (
 )
 
 func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
+	if !s.allowUploadAuth(w, r) {
+		return
+	}
 	var req struct {
 		FileName          string `json:"fileName"`
 		FileSize          int64  `json:"fileSize"`
@@ -397,6 +400,9 @@ func (s *Server) handleCancelUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) loadUploadAuthorized(w http.ResponseWriter, r *http.Request) (store.UploadSession, bool) {
+	if !s.allowUploadAuth(w, r) {
+		return store.UploadSession{}, false
+	}
 	id, err := parseID(r.PathValue("id"))
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid upload id")

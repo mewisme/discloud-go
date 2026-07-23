@@ -24,6 +24,9 @@ var hashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // handleChunkCheck reports whether a chunk is already stored, so clients can
 // skip re-uploading it.
 func (s *Server) handleChunkCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.allowUploadAuth(w, r) {
+		return
+	}
 	hash := r.PathValue("hash")
 	if !hashPattern.MatchString(hash) {
 		writeJSONError(w, http.StatusBadRequest, "Invalid chunk hash")
@@ -45,6 +48,9 @@ func (s *Server) handleChunkCheck(w http.ResponseWriter, r *http.Request) {
 // handleChunkUpload stores one chunk (at most chunkSize bytes). The hash is
 // computed server-side from the received bytes, never trusted from the client.
 func (s *Server) handleChunkUpload(w http.ResponseWriter, r *http.Request) {
+	if !s.allowUploadAuth(w, r) {
+		return
+	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, chunkSize))
 	if err != nil {
 		writeJSONError(w, http.StatusRequestEntityTooLarge,
@@ -88,6 +94,9 @@ func (s *Server) handleChunkUpload(w http.ResponseWriter, r *http.Request) {
 
 // handleUploadComplete assembles a file from previously uploaded chunks.
 func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
+	if !s.allowUploadAuth(w, r) {
+		return
+	}
 	var req struct {
 		FileName    string   `json:"fileName"`
 		ChunkHashes []string `json:"chunkHashes"`

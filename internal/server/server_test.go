@@ -100,15 +100,16 @@ func (f *fakeDiscord) messageJSON(id string) map[string]any {
 }
 
 type memStore struct {
-	mu       sync.Mutex
-	files    map[string]store.File
-	chunks   map[string]store.Chunk
-	uploads  map[string]store.UploadSession
-	stats    map[string]*fileStats
-	visitors map[string]map[string]struct{}
-	users    map[string]store.User
-	byUser   map[string]string        // username -> user id
-	sessions map[string]store.Session // token hash -> session
+	mu        sync.Mutex
+	files     map[string]store.File
+	chunks    map[string]store.Chunk
+	uploads   map[string]store.UploadSession
+	stats     map[string]*fileStats
+	visitors  map[string]map[string]struct{}
+	users     map[string]store.User
+	byUser    map[string]string        // username -> user id
+	sessions  map[string]store.Session // token hash -> session
+	apiTokens map[string]store.APIToken
 }
 
 type fileStats struct {
