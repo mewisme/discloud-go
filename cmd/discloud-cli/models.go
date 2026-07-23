@@ -27,6 +27,7 @@ type FileItem struct {
 	ShareMode          string    `json:"shareMode,omitempty"`
 	MaxDownloads       *int      `json:"maxDownloads"`
 	DownloadCount      int       `json:"downloadCount,omitempty"`
+	SHA256             string    `json:"sha256,omitempty"`
 	URL                string    `json:"url,omitempty"`
 	LongURL            string    `json:"longURL,omitempty"`
 	DownloadURL        string    `json:"downloadURL,omitempty"`
@@ -111,6 +112,7 @@ type InspectResponse struct {
 	ShareMode          string     `json:"shareMode,omitempty"`
 	MaxDownloads       *int       `json:"maxDownloads"`
 	DownloadCount      int        `json:"downloadCount,omitempty"`
+	SHA256             string     `json:"sha256,omitempty"`
 	Views              int64      `json:"views"`
 	Downloads          int64      `json:"downloads"`
 	Ranges             int64      `json:"ranges"`

@@ -137,6 +137,9 @@ func printUploadSuccess(item FileItem) {
 		ui.Cyan(on, item.FileID),
 		ui.Dim(on, status),
 	)
+	if item.SHA256 != "" {
+		fmt.Printf("%s sha256 %s\n", ui.Dim(on, "·"), ui.Cyan(on, item.SHA256))
+	}
 	if item.AccessToken != "" {
 		fmt.Printf("%s %s\n", ui.Yellow(on, ui.IconKey), ui.Cyan(on, item.AccessToken))
 	}

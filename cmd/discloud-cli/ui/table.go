@@ -34,6 +34,7 @@ type Inspect struct {
 	ShareMode         string
 	MaxDownloads      *int
 	DownloadCount     int
+	SHA256            string
 	Views             int64
 	Downloads         int64
 	Ranges            int64
@@ -251,6 +252,7 @@ func PrintInspect(w io.Writer, item Inspect) error {
 			{"name", item.FileName},
 			{"size", client.FormatBytes(item.FileSize)},
 			{"chunks", fmt.Sprintf("%d × %s", item.ChunkCount, client.FormatBytes(item.ChunkSize))},
+			{"sha256", sha256OrDash(item.SHA256)},
 			{"visibility", ShortVis(item.Visibility)},
 			{"status", ShortStatus(item.Status)},
 			{"share mode", shareModeOrDefault(item.ShareMode)},
@@ -281,6 +283,13 @@ func shareModeOrDefault(mode string) string {
 		return "download"
 	}
 	return mode
+}
+
+func sha256OrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func shareDownloadLine(item Inspect) string {

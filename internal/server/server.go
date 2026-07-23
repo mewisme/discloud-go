@@ -67,6 +67,7 @@ type Store interface {
 	RevokeAPITokensByUser(ctx context.Context, userID string, now time.Time) error
 	TouchAPITokenLastUsed(ctx context.Context, id string, now time.Time) error
 	CountAPITokensByUser(ctx context.Context, userID string) (int64, error)
+	AdminOverview(ctx context.Context, since time.Time) (store.AdminOverview, error)
 	Ping(ctx context.Context) error
 }
 
@@ -195,6 +196,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/{id}/revoke", s.handleRevokeFile)
 	mux.HandleFunc("POST /api/files/{id}/access-token/rotate", s.handleRotateToken)
 	mux.HandleFunc("DELETE /api/files/{id}", s.handleDeleteFile)
+	mux.HandleFunc("GET /api/admin/overview", s.handleAdminOverview)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /f/{id}", s.handleDownload)
 	mux.HandleFunc("GET /f/{id}/{name...}", s.handleDownload)

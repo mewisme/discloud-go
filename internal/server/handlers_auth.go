@@ -409,7 +409,11 @@ func (s *Server) requireScope(w http.ResponseWriter, r *http.Request, scope stri
 		return store.User{}, false
 	}
 	if !p.hasScope(scope) {
-		writeJSONError(w, http.StatusForbidden, "Missing required scope: "+scope)
+		msg := "Missing required scope: " + scope
+		if scope == store.ScopeAdmin {
+			msg = "Missing required scope: admin (sign in with discloud auth login, or use a PAT that includes the admin scope)"
+		}
+		writeJSONError(w, http.StatusForbidden, msg)
 		return store.User{}, false
 	}
 	if scope == store.ScopeAdmin && p.User.Role != store.RoleAdmin {

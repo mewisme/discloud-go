@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/mewisme/discloud-go/internal/auth"
 	"github.com/mewisme/discloud-go/internal/discord"
+	"github.com/mewisme/discloud-go/internal/integrity"
 	"github.com/mewisme/discloud-go/internal/store"
 )
 
@@ -79,8 +82,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	body := http.MaxBytesReader(w, r.Body, s.maxRawUploadBytes)
 
 	var (
-		mu    sync.Mutex
-		parts []store.FilePart
+		mu     sync.Mutex
+		parts  []store.FilePart
+		hashes []string
+		sizes  []int64
 	)
 	g, ctx := errgroup.WithContext(r.Context())
 	g.SetLimit(s.discordUploadLimit())
@@ -89,6 +94,16 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		if ctx.Err() != nil { // an upload already failed; stop reading
 			return ctx.Err()
 		}
+		sum := sha256.Sum256(data)
+		hash := hex.EncodeToString(sum[:])
+		mu.Lock()
+		for len(hashes) <= idx {
+			hashes = append(hashes, "")
+			sizes = append(sizes, 0)
+		}
+		hashes[idx] = hash
+		sizes[idx] = int64(len(data))
+		mu.Unlock()
 		g.Go(func() error {
 			up, err := s.discord.UploadChunk(ctx, fmt.Sprintf("%s-chunk-%d", fileName, idx+1), data)
 			if err != nil {
@@ -140,12 +155,20 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	digest, err := integrity.FileSHA256(hashes, sizes)
+	if err != nil {
+		s.log.Error("digest failed", "file", fileName, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to compute file digest")
+		return
+	}
+
 	f, rawToken, err := s.newOwnedFile(r, fileID, fileName, fileSize, parts)
 	if err != nil {
 		s.log.Error("prepare file failed", "file", fileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to prepare file metadata")
 		return
 	}
+	f.SHA256 = digest
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		s.log.Error("persist file failed", "file", fileName, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to persist file metadata")
@@ -198,6 +221,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if access.ViaToken {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 	}
+	setContentDigestHeaders(w, f.SHA256)
 
 	if r.URL.Query().Get("json") == "1" {
 		writeJSON(w, http.StatusOK, s.fileMetaDTO(r, f, "", access.User))
@@ -565,6 +589,9 @@ func (s *Server) fileLinksResponse(base string, f store.File, rawToken string, v
 			out["maxDownloads"] = nil
 		}
 	}
+	if f.SHA256 != "" {
+		out["sha256"] = f.SHA256
+	}
 	return out
 }
 
@@ -573,6 +600,19 @@ func fileStatusOrReady(status string) string {
 		return store.FileStatusReady
 	}
 	return status
+}
+
+// setContentDigestHeaders exposes the whole-file digest for client-side verify.
+func setContentDigestHeaders(w http.ResponseWriter, shaHex string) {
+	if shaHex == "" {
+		return
+	}
+	w.Header().Set("X-Content-SHA256", shaHex)
+	raw, err := hex.DecodeString(shaHex)
+	if err != nil || len(raw) != sha256.Size {
+		return
+	}
+	w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(raw))
 }
 
 func withToken(rawURL, token string) string {

@@ -106,6 +106,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		FileName    string   `json:"fileName"`
 		ChunkHashes []string `json:"chunkHashes"`
+		FileSha256  string   `json:"fileSha256"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -136,7 +137,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, rawToken, err := s.assembleFileFromHashes(r, req.FileName, req.ChunkHashes)
+	f, rawToken, err := s.assembleFileFromHashes(r, req.FileName, req.ChunkHashes, req.FileSha256)
 	if err != nil {
 		var httpErr *uploadHTTPError
 		if errors.As(err, &httpErr) {

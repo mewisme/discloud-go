@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mewisme/discloud-go/internal/auth"
+	"github.com/mewisme/discloud-go/internal/integrity"
 	"github.com/mewisme/discloud-go/internal/store"
 )
 
@@ -264,6 +265,12 @@ func (s *Server) handleCompleteUploadSession(w http.ResponseWriter, r *http.Requ
 	if !s.requireUploadRate(w, r) {
 		return
 	}
+	var hint struct {
+		FileSha256 string `json:"fileSha256"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&hint)
+	}
 	now := s.now().UTC()
 	if up.Status != store.UploadCompleted &&
 		(up.Status == store.UploadCancelled || up.Status == store.UploadExpired || !up.ExpiresAt.After(now)) {
@@ -321,7 +328,7 @@ func (s *Server) handleCompleteUploadSession(w http.ResponseWriter, r *http.Requ
 		hashes[i] = h
 	}
 
-	f, rawToken, err := s.assembleFileFromHashes(r, sess.FileName, hashes)
+	f, rawToken, err := s.assembleFileFromHashes(r, sess.FileName, hashes, hint.FileSha256)
 	if err != nil {
 		_ = s.store.AbortUploadComplete(r.Context(), sess.ID, now)
 		var httpErr *uploadHTTPError
@@ -348,12 +355,14 @@ type uploadHTTPError struct {
 func (e *uploadHTTPError) Error() string { return e.msg }
 
 // assembleFileFromHashes resolves hashes, dedupes for owner, or creates a new file.
-func (s *Server) assembleFileFromHashes(r *http.Request, fileName string, hashes []string) (store.File, string, error) {
+// expectedSHA, when non-empty, must match the computed digest or returns 400.
+func (s *Server) assembleFileFromHashes(r *http.Request, fileName string, hashes []string, expectedSHA string) (store.File, string, error) {
 	known, err := s.store.GetChunks(r.Context(), hashes)
 	if err != nil {
 		return store.File{}, "", err
 	}
 	var fileSize int64
+	sizes := make([]int64, len(hashes))
 	parts := make([]store.FilePart, len(hashes))
 	messageIDs := make([]string, len(hashes))
 	for i, h := range hashes {
@@ -366,8 +375,16 @@ func (s *Server) assembleFileFromHashes(r *http.Request, fileName string, hashes
 				fmt.Sprintf("Chunk %d is %d bytes; every chunk except the last must be exactly %d bytes", i, c.Size, chunkSize)}
 		}
 		fileSize += c.Size
+		sizes[i] = c.Size
 		parts[i] = store.FilePart{MessageID: c.MessageID, BotID: c.BotID}
 		messageIDs[i] = c.MessageID
+	}
+	digest, err := integrity.FileSHA256(hashes, sizes)
+	if err != nil {
+		return store.File{}, "", err
+	}
+	if expected := strings.TrimSpace(expectedSHA); expected != "" && !strings.EqualFold(expected, digest) {
+		return store.File{}, "", &uploadHTTPError{http.StatusBadRequest, "fileSha256 does not match server digest"}
 	}
 	name := formatFileName(fileName)
 	if u, ok := s.sessionUser(r); ok {
@@ -390,6 +407,7 @@ func (s *Server) assembleFileFromHashes(r *http.Request, fileName string, hashes
 	if err != nil {
 		return store.File{}, "", err
 	}
+	f.SHA256 = digest
 	if err := s.store.CreateFile(r.Context(), f); err != nil {
 		return store.File{}, "", err
 	}

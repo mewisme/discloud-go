@@ -47,6 +47,7 @@ type File struct {
 	MaxDownloads         *int       `json:"maxDownloads,omitempty"`
 	DownloadCount        int        `json:"downloadCount"`
 	ShareMode            string     `json:"shareMode"`
+	SHA256               string     `json:"sha256,omitempty"` // discloud-sha256-v1; empty for legacy
 	Parts                []FilePart `json:"-"`
 }
 
@@ -144,12 +145,16 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 	if f.AccessTokenRotatedAt != nil {
 		rotated = *f.AccessTokenRotatedAt
 	}
+	var sha any
+	if f.SHA256 != "" {
+		sha = f.SHA256
+	}
 	if _, err := tx.Exec(ctx, `
-				INSERT INTO files (id, name, size, chunk_size, created_at, owner_user_id, visibility,
-				                   status, access_token_hash, access_token_rotated_at, expires_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+					INSERT INTO files (id, name, size, chunk_size, created_at, owner_user_id, visibility,
+					                   status, access_token_hash, access_token_rotated_at, expires_at, sha256)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		f.ID, f.Name, f.Size, f.ChunkSize, f.CreatedAt, f.OwnerUserID, vis, status,
-		tokenHash, rotated, f.ExpiresAt); err != nil {
+		tokenHash, rotated, f.ExpiresAt, sha); err != nil {
 		return fmt.Errorf("insert file: %w", err)
 	}
 	rows := make([][]any, len(f.Parts))
@@ -169,10 +174,10 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 
 func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 	row := s.pool.QueryRow(ctx, `
-			SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
-			       access_token_hash, access_token_rotated_at, expires_at,
-			       password_hash, max_downloads, download_count, share_mode
-			FROM files WHERE id = $1`, id)
+				SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
+				       access_token_hash, access_token_rotated_at, expires_at,
+				       password_hash, max_downloads, download_count, share_mode, sha256
+				FROM files WHERE id = $1`, id)
 	f, err := scanFileMeta(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return File{}, ErrNotFound
@@ -241,9 +246,10 @@ func scanFileMeta(row scannable) (File, error) {
 	var rotated *time.Time
 	var pwHash *string
 	var maxDL *int
+	var sha *string
 	err := row.Scan(&f.ID, &f.Name, &f.Size, &f.ChunkSize, &f.CreatedAt,
 		&owner, &f.Visibility, &f.Status, &tokenHash, &rotated, &f.ExpiresAt,
-		&pwHash, &maxDL, &f.DownloadCount, &f.ShareMode)
+		&pwHash, &maxDL, &f.DownloadCount, &f.ShareMode, &sha)
 	if err != nil {
 		return File{}, err
 	}
@@ -260,6 +266,9 @@ func scanFileMeta(row scannable) (File, error) {
 		f.PasswordHash = *pwHash
 	}
 	f.MaxDownloads = maxDL
+	if sha != nil {
+		f.SHA256 = *sha
+	}
 	if f.Status == "" {
 		f.Status = FileStatusReady
 	}
@@ -353,7 +362,7 @@ func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, off
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
 		       access_token_hash, access_token_rotated_at, expires_at,
-		       password_hash, max_downloads, download_count, share_mode
+		       password_hash, max_downloads, download_count, share_mode, sha256
 		FROM files
 		WHERE owner_user_id = $1
 		ORDER BY created_at DESC, id DESC

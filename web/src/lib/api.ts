@@ -37,6 +37,25 @@ export type AccountMe = {
   };
 };
 
+/** GET /api/admin/overview (admin only). Traffic counters are lifetime. */
+export type AdminOverview = {
+  storage: {
+    fileCount: number;
+    totalBytes: number;
+    chunkStoreCount: number;
+  };
+  users: { count: number; admins: number };
+  uploads: {
+    openSessions: number;
+    completed24h: number;
+    expired24h: number;
+    cancelled24h: number;
+  };
+  traffic: { downloads: number; bytesServed: number };
+  bots: { configured: number };
+  deps: { postgres: boolean; valkey: boolean };
+};
+
 /** Upload outcome badge on a file record. */
 export type FileStatus = "ready" | "reused";
 
@@ -60,6 +79,8 @@ export interface FileLinks {
   shareMode?: ShareMode;
   maxDownloads?: number | null;
   downloadCount?: number;
+  /** discloud-sha256-v1 whole-file digest when known. */
+  sha256?: string;
   /** Present once when upload creates a private file. */
   accessToken?: string;
 }
@@ -81,6 +102,7 @@ export interface FileMeta {
   shareMode?: ShareMode;
   maxDownloads?: number | null;
   downloadCount?: number;
+  sha256?: string;
 }
 
 /** Owner list item from GET /api/files */
@@ -107,6 +129,7 @@ export interface FileInspect {
   shareMode?: ShareMode;
   maxDownloads?: number | null;
   downloadCount?: number;
+  sha256?: string;
   views: number;
   downloads: number;
   ranges: number;
@@ -266,6 +289,10 @@ export async function fetchMe(): Promise<AuthUser | null> {
 
 export async function fetchAccountMe(): Promise<AccountMe> {
   return apiFetch<AccountMe>("/api/auth/me");
+}
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  return apiFetch<AdminOverview>("/api/admin/overview");
 }
 
 export async function signUp(username: string, password: string): Promise<AuthUser> {

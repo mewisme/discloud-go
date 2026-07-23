@@ -60,6 +60,43 @@ func (c *Client) Ready() (string, error) {
 	return string(b), nil
 }
 
+// AdminOverview is GET /api/admin/overview (admin role / scope).
+type AdminOverview struct {
+	Storage struct {
+		FileCount       int64 `json:"fileCount"`
+		TotalBytes      int64 `json:"totalBytes"`
+		ChunkStoreCount int64 `json:"chunkStoreCount"`
+	} `json:"storage"`
+	Users struct {
+		Count  int64 `json:"count"`
+		Admins int64 `json:"admins"`
+	} `json:"users"`
+	Uploads struct {
+		OpenSessions int64 `json:"openSessions"`
+		Completed24h int64 `json:"completed24h"`
+		Expired24h   int64 `json:"expired24h"`
+		Cancelled24h int64 `json:"cancelled24h"`
+	} `json:"uploads"`
+	Traffic struct {
+		Downloads   int64 `json:"downloads"`
+		BytesServed int64 `json:"bytesServed"`
+	} `json:"traffic"`
+	Bots struct {
+		Configured int `json:"configured"`
+	} `json:"bots"`
+	Deps struct {
+		Postgres bool `json:"postgres"`
+		Valkey   bool `json:"valkey"`
+	} `json:"deps"`
+}
+
+// GetAdminOverview fetches instance ops aggregates (requires admin).
+func (c *Client) GetAdminOverview() (AdminOverview, error) {
+	var out AdminOverview
+	err := c.DoJSON(http.MethodGet, "/api/admin/overview", nil, &out)
+	return out, err
+}
+
 // DownloadOptions controls GET /f/{id}.
 type DownloadOptions struct {
 	Name     string

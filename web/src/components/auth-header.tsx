@@ -99,6 +99,15 @@ export function AuthHeader() {
           >
             Account
           </DropdownMenuItem>
+          {user.role === "admin" ? (
+            <DropdownMenuItem
+              nativeButton={false}
+              closeOnClick
+              render={<Link href="/admin" />}
+            >
+              Admin
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             nativeButton={false}
             closeOnClick

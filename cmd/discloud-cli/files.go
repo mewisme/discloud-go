@@ -8,6 +8,7 @@ import (
 
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
+	"github.com/mewisme/discloud-go/internal/integrity"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +21,7 @@ func newFilesCmd() *cobra.Command {
 		newFilesListCmd(),
 		newFilesGetCmd(),
 		newFilesInspectCmd(),
+		newFilesVerifyCmd(),
 		newFilesVisibilityCmd(),
 		newFilesShareCmd(),
 		newFilesRevokeCmd(),
@@ -133,6 +135,39 @@ func newFilesInspectCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&token, "token", "", "access token for private files")
 	return cmd
+}
+
+func newFilesVerifyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify <path> <sha256>",
+		Short: "Verify a local file against a discloud-sha256-v1 digest",
+		Args:  cobra.ExactArgs(2),
+		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			path := args[0]
+			want := strings.TrimSpace(strings.ToLower(args[1]))
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			got, err := integrity.FileSHA256FromReader(f)
+			if err != nil {
+				return err
+			}
+			on := ui.ColorOn(os.Stdout)
+			if !strings.EqualFold(got, want) {
+				fmt.Fprintf(os.Stderr, "%s mismatch\n  got  %s\n  want %s\n",
+					ui.Red(on, "verify failed"), got, want)
+				return fmt.Errorf("digest mismatch")
+			}
+			ui.PrintSuccess("%s %s matches %s",
+				ui.IconOK,
+				ui.Bold(on, path),
+				ui.Cyan(on, got),
+			)
+			return nil
+		}),
+	}
 }
 
 func newFilesVisibilityCmd() *cobra.Command {
@@ -601,6 +636,7 @@ func toUIInspect(item InspectResponse) ui.Inspect {
 		ShareMode:         item.ShareMode,
 		MaxDownloads:      item.MaxDownloads,
 		DownloadCount:     item.DownloadCount,
+		SHA256:            item.SHA256,
 		Views:             item.Views,
 		Downloads:         item.Downloads,
 		Ranges:            item.Ranges,

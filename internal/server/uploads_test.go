@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,6 +100,9 @@ func TestUploadSessionFlow(t *testing.T) {
 	}
 	if file["fileName"] != "docs/hello-world.txt" {
 		t.Fatalf("fileName = %v", file["fileName"])
+	}
+	if file["sha256"] != hash {
+		t.Fatalf("sha256 = %v, want single-chunk content hash %s", file["sha256"], hash)
 	}
 	fileID, _ := file["fileId"].(string)
 	if fileID == "" {
@@ -249,5 +253,29 @@ func TestUploadSessionExpire(t *testing.T) {
 	if comp.StatusCode != http.StatusGone {
 		b, _ := io.ReadAll(comp.Body)
 		t.Fatalf("complete after expire = %d: %s, want 410", comp.StatusCode, b)
+	}
+}
+
+func TestFileSha256MismatchRejected(t *testing.T) {
+	ts, _, _ := newTestServer(t)
+	payload := []byte("mismatch-check-payload")
+	sum := sha256.Sum256(payload)
+	hash := hex.EncodeToString(sum[:])
+
+	id, token := createUploadSession(t, ts.URL, "m.bin", int64(len(payload)))
+	_ = postChunk(t, ts.URL, payload)
+	regBody, _ := json.Marshal(map[string]string{"hash": hash})
+	resp := putWithToken(t, http.MethodPut, ts.URL+"/api/uploads/"+id+"/parts/0", token, regBody, "application/json")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("register = %d", resp.StatusCode)
+	}
+
+	badHint, _ := json.Marshal(map[string]string{"fileSha256": strings.Repeat("0", 64)})
+	comp := putWithToken(t, http.MethodPost, ts.URL+"/api/uploads/"+id+"/complete", token, badHint, "application/json")
+	defer comp.Body.Close()
+	if comp.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(comp.Body)
+		t.Fatalf("complete with bad hint = %d: %s, want 400", comp.StatusCode, b)
 	}
 }

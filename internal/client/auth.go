@@ -2,29 +2,45 @@ package client
 
 import "net/http"
 
+// withCookieSession runs fn without Bearer so Set-Cookie is stored (login/signup)
+// and Origin is sent for CSRF. Configured PAT is restored afterward and still
+// used for later requests when the jar has no session.
+func (c *Client) withCookieSession(fn func() error) error {
+	tok := c.cfg.Token
+	c.cfg.Token = ""
+	defer func() { c.cfg.Token = tok }()
+	return fn()
+}
+
 // SignUp creates an account and stores the session cookie.
 func (c *Client) SignUp(username, password string) (map[string]any, error) {
 	var out map[string]any
-	err := c.DoJSON(http.MethodPost, "/api/auth/signup", map[string]string{
-		"username": username,
-		"password": password,
-	}, &out)
+	err := c.withCookieSession(func() error {
+		return c.DoJSON(http.MethodPost, "/api/auth/signup", map[string]string{
+			"username": username,
+			"password": password,
+		}, &out)
+	})
 	return out, err
 }
 
 // SignIn authenticates and stores the session cookie.
 func (c *Client) SignIn(username, password string) (map[string]any, error) {
 	var out map[string]any
-	err := c.DoJSON(http.MethodPost, "/api/auth/signin", map[string]string{
-		"username": username,
-		"password": password,
-	}, &out)
+	err := c.withCookieSession(func() error {
+		return c.DoJSON(http.MethodPost, "/api/auth/signin", map[string]string{
+			"username": username,
+			"password": password,
+		}, &out)
+	})
 	return out, err
 }
 
 // SignOut clears the server session and local cookie jar.
 func (c *Client) SignOut() error {
-	err := c.DoJSON(http.MethodPost, "/api/auth/signout", nil, nil)
+	err := c.withCookieSession(func() error {
+		return c.DoJSON(http.MethodPost, "/api/auth/signout", nil, nil)
+	})
 	_ = c.ClearSession()
 	return err
 }

@@ -565,6 +565,47 @@ func (m *memStore) ExtendExpiration(_ context.Context, id string, now time.Time,
 
 func (m *memStore) Ping(context.Context) error { return nil }
 
+func (m *memStore) AdminOverview(_ context.Context, since time.Time) (store.AdminOverview, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var o store.AdminOverview
+	for _, f := range m.files {
+		o.FileCount++
+		o.TotalBytes += f.Size
+	}
+	o.ChunkStoreCount = int64(len(m.chunks))
+	for _, u := range m.users {
+		o.UserCount++
+		if u.Role == store.RoleAdmin {
+			o.AdminCount++
+		}
+	}
+	m.ensureUploads()
+	for _, u := range m.uploads {
+		switch u.Status {
+		case store.UploadPending, store.UploadUploading:
+			o.OpenSessions++
+		case store.UploadCompleted:
+			if !u.UpdatedAt.Before(since) {
+				o.Completed24h++
+			}
+		case store.UploadExpired:
+			if !u.UpdatedAt.Before(since) {
+				o.Expired24h++
+			}
+		case store.UploadCancelled:
+			if !u.UpdatedAt.Before(since) {
+				o.Cancelled24h++
+			}
+		}
+	}
+	for _, st := range m.stats {
+		o.Downloads += st.downloads
+		o.BytesServed += st.bytesServed
+	}
+	return o, nil
+}
+
 type memCache struct {
 	mu     sync.Mutex
 	urls   map[string]string

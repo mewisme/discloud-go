@@ -29,6 +29,7 @@ type Config struct {
 // DefaultConfig resolves settings in order:
 // process env (DISCLOUD_BASE / DISCLOUD_ORIGIN / DISCLOUD_TOKEN) → config.json → localhost defaults.
 // CLI flags (--base / --origin) override after this when set by the caller.
+// Auth priority at request time: session cookie jar > Token (env/config).
 func DefaultConfig() Config {
 	envBase := os.Getenv("DISCLOUD_BASE")
 	envOrigin := os.Getenv("DISCLOUD_ORIGIN")
@@ -193,9 +194,6 @@ func New(cfg Config) (*Client, error) {
 	}
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	cfg.Origin = strings.TrimRight(cfg.Origin, "/")
-	if cfg.CookiePath == "" {
-		cfg.CookiePath = defaultCookiePath()
-	}
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("base URL: %w", err)
@@ -210,8 +208,8 @@ func New(cfg Config) (*Client, error) {
 		base: u,
 		http: &http.Client{Jar: jar},
 	}
-	// PAT mode: never load or send session cookies (cookie would win on the server).
-	if strings.TrimSpace(cfg.Token) == "" {
+	// Empty CookiePath = ephemeral jar (no load/save); used by auth token info.
+	if cfg.CookiePath != "" {
 		if err := c.loadCookies(); err != nil {
 			return nil, err
 		}
@@ -222,9 +220,28 @@ func New(cfg Config) (*Client, error) {
 // Config returns a copy of the client config.
 func (c *Client) Config() Config { return c.cfg }
 
+// hasSessionCookie reports whether the jar has a non-empty discloud_session.
+func (c *Client) hasSessionCookie() bool {
+	for _, ck := range c.jar.Cookies(c.base) {
+		if ck.Name == sessionCookie && strings.TrimSpace(ck.Value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// useBearer is true when a PAT should be sent. Session cookie in the jar wins
+// over Token from env/config.json (jar > config).
+func (c *Client) useBearer() bool {
+	if c.hasSessionCookie() {
+		return false
+	}
+	return strings.TrimSpace(c.cfg.Token) != ""
+}
+
 // Do performs an HTTP request against the API.
 // Mutating methods with a session cookie send Origin for CSRF.
-// When Token is set, sends Authorization: Bearer and omits Origin (Bearer-only CSRF path).
+// When using a PAT (no session cookie), sends Authorization: Bearer and omits Origin.
 // path may include a query string (e.g. "/api/upload?fileName=x").
 func (c *Client) Do(method, path string, body io.Reader, contentType string) (*http.Response, error) {
 	return c.doWithHeaders(method, path, body, contentType, nil)
@@ -273,7 +290,7 @@ func (c *Client) doWithHeaders(method, path string, body io.Reader, contentType 
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", "discloud-cli")
-	useBearer := strings.TrimSpace(c.cfg.Token) != ""
+	useBearer := c.useBearer()
 	if useBearer {
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.cfg.Token))
 	}
@@ -284,16 +301,14 @@ func (c *Client) doWithHeaders(method, path string, body io.Reader, contentType 
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	httpClient := c.http
-	if useBearer {
-		// No cookie jar — Bearer-only CSRF path (session cookie would require Origin).
-		httpClient = &http.Client{Timeout: c.http.Timeout, Transport: c.http.Transport}
-	}
-	res, err := httpClient.Do(req)
+	// Always use the jar client so Set-Cookie (e.g. auth login) is stored even when
+	// this request sends Bearer. Outbound Cookie is empty until a session exists;
+	// once the jar has discloud_session, useBearer is false and cookie auth wins.
+	res, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	if !useBearer {
+	if c.cfg.CookiePath != "" {
 		if err := c.saveCookies(); err != nil {
 			res.Body.Close()
 			return nil, err
@@ -377,6 +392,9 @@ func (c *Client) saveCookies() error {
 // ClearSession removes persisted cookies.
 func (c *Client) ClearSession() error {
 	c.jar.SetCookies(c.base, []*http.Cookie{{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1}})
+	if c.cfg.CookiePath == "" {
+		return nil
+	}
 	_ = os.Remove(c.cfg.CookiePath)
 	return c.saveCookies()
 }

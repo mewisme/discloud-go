@@ -41,6 +41,7 @@ func newRootCmd() *cobra.Command {
 		newChunksCmd(),
 		newGetCmd(),
 		newFilesCmd(),
+		newAdminCmd(),
 		newHealthCmd(),
 		newReadyCmd(),
 		newConfigCmd(),

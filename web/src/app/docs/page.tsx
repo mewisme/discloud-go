@@ -304,6 +304,7 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
   "fileSize": 10485760,
   "chunkSize": 8388608,
   "visibility": "public",
+  "status": "ready",
   "ownedByCurrentUser": false,
   "createdAt": "…",
   "expiresAt": "…",
@@ -312,6 +313,11 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
   "downloadURL": "$BASE/f/894d9eec…?download=1",
   "longDownloadURL": "$BASE/f/894d9eec…/video.mp4?download=1"
 }`}</DocsCode>
+            <p>
+              <code>status</code> is the upload result: <code>ready</code> for a
+              new file, or <code>reused</code> when the same owner re-completes
+              identical parts. It is not a resource lifecycle state.
+            </p>
             <p>
               <strong>Errors:</strong> 400 if <code>fileName</code> is missing or
               the body is empty.
@@ -408,7 +414,12 @@ curl -s "$BASE/f/<id>?token=<accessToken>&json=1"`}</DocsCode>
         </TabsContent>
 
         <TabsContent value="files" className="flex flex-col gap-4">
-          <SectionIntro title="Files & inspect" />
+          <SectionIntro title="Files & inspect">
+            <code>status</code> on file DTOs is an upload result (
+            <code>ready</code> / <code>reused</code>), not a resource lifecycle.
+            Inspect analytics are visible to anyone who can access the file
+            (same authz as metadata).
+          </SectionIntro>
 
           <Endpoint method="GET" path="/api/files">
             <p>
@@ -416,7 +427,7 @@ curl -s "$BASE/f/<id>?token=<accessToken>&json=1"`}</DocsCode>
               (paginated <code>limit</code>/<code>offset</code>).
             </p>
             <DocsCode>{`curl -s -b cookies.txt "$BASE/api/files"
-# { "files": [{ "fileId", "fileName", "visibility", "expiresAt", … }] }`}</DocsCode>
+# { "files": [{ "fileId", "fileName", "status", "visibility", "expiresAt", … }] }`}</DocsCode>
           </Endpoint>
 
           <Endpoint method="GET" path="/api/files/{fileId}">

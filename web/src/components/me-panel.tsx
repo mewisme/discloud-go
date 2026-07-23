@@ -227,6 +227,11 @@ export function MeOverviewPanel() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Member since {formatDate(account.createdAt)}
                 </p>
+                {account.role === "admin" ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    First account on this instance — you can manage any file.
+                  </p>
+                ) : null}
               </div>
             </div>
 

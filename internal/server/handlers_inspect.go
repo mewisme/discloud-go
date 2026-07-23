@@ -55,7 +55,7 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 	}
 	base := s.baseURL(r)
 	links := s.fileLinksResponse(base, info.File, token, access.User)
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"fileId":             info.ID,
 		"fileName":           info.Name,
 		"fileSize":           info.Size,
@@ -80,5 +80,9 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 		"longURL":            links["longURL"],
 		"downloadURL":        links["downloadURL"],
 		"longDownloadURL":    links["longDownloadURL"],
-	})
+	}
+	if v, ok := links["sha256"]; ok {
+		out["sha256"] = v
+	}
+	writeJSON(w, http.StatusOK, out)
 }

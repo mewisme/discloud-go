@@ -38,15 +38,29 @@ Delete and cancel remove **Postgres rows only** — Discord attachments are neve
 - Share controls: password (Argon2id), custom expiry (cap +30d), download cap, `view`|`download` mode, revoke
 - Browser unlock: `POST /api/files/{id}/unlock` → cookie; CLI/API: `X-File-Password`
 - Retention: anonymous **7d**, signed-in **30d**; full `?download=1` extends **+7d** (cap 30d)
-- File `status`: `ready` (new) or `reused` (same owner re-completed identical parts)
 - Session cookie `discloud_session`; signup / signin / signout / password / preferences
 - Auth rate limit: 10 attempts / 15 minutes (Valkey)
 
 ### Clients & ops
 
-- Next.js UI (`/`, `/files`, `/docs`, sign-in/up, file page)
-- CLI: `auth`, `upload`, `files`, `get`, `chunks`, `config`, `health`, `ready`
+- Next.js UI (`/`, `/files`, `/docs`, `/admin`, sign-in/up, file page)
+- CLI: `auth`, `upload`, `files`, `admin overview`, `get`, `chunks`, `config`, `health`, `ready`
+- Admin overview: `GET /api/admin/overview` (admin role/scope) — storage, users, open/24h upload sessions, lifetime traffic, bot count, Postgres/Valkey health; UI at `/admin`; CLI `discloud admin overview`
 - `/healthz`, `/readyz` (Postgres + Valkey), GHCR images, GoReleaser on `v*` tags
+
+## Domain model
+
+Three separate concepts — do not conflate them:
+
+| Concept | What it is | States / values |
+| --- | --- | --- |
+| **Upload session** | Incomplete upload work | `pending` → `uploading` → `completing` → `completed`, or `cancelled` / `expired`. Not a `files` row. |
+| **File resource** | Row in `files` after a successful complete | Share, visibility, expiry, digest, inspect counters live here. |
+| **`files.status`** | Upload **result** badge only | `ready` (new assemble) or `reused` (same owner re-completed identical parts). Not a lifecycle; there is no `uploading` on files. |
+
+- **Delete** removes Postgres metadata only. Discord attachments stay; the app never purges them.
+- **Admin:** first signup on an empty DB gets `role=admin` (advisory lock); later signups are `user`. Admins can manage any file.
+- **JSON IDs:** file payloads use `fileId`; account and API-token payloads use `id`.
 
 ## Architecture
 
@@ -184,9 +198,9 @@ Compose injects `DATABASE_URL` and `VALKEY_URL` for containers. Set them yoursel
 | --- | --- |
 | `DISCLOUD_BASE` | API origin |
 | `DISCLOUD_ORIGIN` | Must match server `WEB_ORIGIN` (CSRF) when using cookie login |
-| `DISCLOUD_TOKEN` | Personal access token (`dc_…`); Bearer auth, no cookie/Origin needed |
+| `DISCLOUD_TOKEN` | Personal access token (`dc_…`). Used only when the session cookie jar is empty. Admin APIs need the `admin` scope on the PAT (admin role alone is not enough for Bearer). |
 
-Resolution: env → `config.json` → `http://localhost:8080` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. See `discloud config --help`.
+Resolution: env → `config.json` → `http://localhost:8080` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. Auth: **session cookie jar wins over** `DISCLOUD_TOKEN` / config token. Admin: cookie session as `role=admin` is enough; PAT-only needs scope `admin` (plus admin role). See `discloud config --help`.
 
 ### Fixed product limits (not env)
 
@@ -219,6 +233,25 @@ discloud files list
 discloud files share <id> --password 'secret-pass' --mode view --max-downloads 10
 discloud files revoke <id> -y
 discloud get <file-id> --password 'secret-pass' --download --out ./downloaded.bin
+discloud files verify ./downloaded.bin <sha256>
+```
+
+### File integrity (`sha256`)
+
+New uploads store a whole-file digest (`files.sha256`, field `sha256` on API DTOs). Algorithm **discloud-sha256-v1**:
+
+1. Split the file into 8 MiB chunks (last chunk may be shorter).
+2. Let `H_i` be the SHA-256 of chunk `i` bytes (hex), `S_i` its length.
+3. If there is **one** chunk: digest = `H_0` (same as `sha256sum` of the file).
+4. If there are **two or more** chunks: digest = SHA-256 of the concatenation  
+   `BE64(S_0) || raw32(H_0) || BE64(S_1) || raw32(H_1) || …`  
+   (`BE64` = big-endian uint64; `raw32` = 32-byte decode of the hex hash).
+
+Legacy rows may omit `sha256` (null until re-uploaded). Downloads set `X-Content-SHA256` and `Digest: sha-256=…` when known. Complete bodies may send `fileSha256` as a hint; mismatch → 400.
+
+```bash
+discloud files verify ./downloaded.bin "$(curl -sS "$API/api/files/$ID" | jq -r .sha256)"
+# or: sha256sum ./downloaded.bin   # only when the file is ≤ 8 MiB (single chunk)
 ```
 
 ### Automation (API tokens)
@@ -230,9 +263,9 @@ discloud auth login
 discloud auth token create --name ci --scopes upload,read,manage
 discloud config set --token          # prompts for dc_… (same as: config set token)
 # or: export DISCLOUD_TOKEN=dc_…
-discloud upload ./artifact.bin      # no cookie jar / Origin required
+discloud upload ./artifact.bin      # uses PAT if no session cookie; else jar wins
 discloud auth token list
-discloud auth token info            # validate config/env token (alias: validate)
+discloud auth token info            # validate PAT only (ignores jar; alias: validate)
 discloud auth token revoke <id> -y
 discloud config unset token
 ```

@@ -441,7 +441,7 @@ function ResultBody({
                   result.status === "reused" ? "outline" : "secondary"
                 }
               >
-                {result.status ?? "ready"}
+                {result.status === "reused" ? "Reused" : "Ready"}
               </Badge>
               {result.visibility && (
                 <Badge variant="secondary">{result.visibility}</Badge>
@@ -455,6 +455,11 @@ function ResultBody({
             <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
               {result.fileId}
             </p>
+            {result.sha256 && (
+              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={result.sha256}>
+                sha256 {result.sha256.slice(0, 12)}…
+              </p>
+            )}
           </div>
           <Button
             variant="ghost"
@@ -470,7 +475,7 @@ function ResultBody({
           <Badge
             variant={result.status === "reused" ? "outline" : "secondary"}
           >
-            {result.status ?? "ready"}
+            {result.status === "reused" ? "Reused" : "Ready"}
           </Badge>
           {result.visibility && (
             <Badge variant="secondary">{result.visibility}</Badge>
