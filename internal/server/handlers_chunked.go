@@ -116,70 +116,17 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	known, err := s.store.GetChunks(r.Context(), req.ChunkHashes)
+	f, rawToken, err := s.assembleFileFromHashes(r, req.FileName, req.ChunkHashes)
 	if err != nil {
-		s.log.Error("chunk resolve failed", "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "Internal server error")
+		var httpErr *uploadHTTPError
+		if errors.As(err, &httpErr) {
+			writeJSONError(w, httpErr.code, httpErr.msg)
+			return
+		}
+		s.log.Error("assemble failed", "file", req.FileName, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to assemble file")
 		return
 	}
-
-	// Range math requires every chunk except the last to be exactly chunkSize.
-	var fileSize int64
-	parts := make([]store.FilePart, len(req.ChunkHashes))
-	messageIDs := make([]string, len(req.ChunkHashes))
-	for i, h := range req.ChunkHashes {
-		c, ok := known[h]
-		if !ok {
-			writeJSONError(w, http.StatusBadRequest, "Unknown chunk hash: "+h)
-			return
-		}
-		if i < len(req.ChunkHashes)-1 && c.Size != chunkSize {
-			writeJSONError(w, http.StatusBadRequest,
-				fmt.Sprintf("Chunk %d is %d bytes; every chunk except the last must be exactly %d bytes", i, c.Size, chunkSize))
-			return
-		}
-		fileSize += c.Size
-		parts[i] = store.FilePart{MessageID: c.MessageID, BotID: c.BotID}
-		messageIDs[i] = c.MessageID
-	}
-
-	name := formatFileName(req.FileName)
-	// Same logged-in user + same name + same chunks → reuse. Other users ignored.
-	if u, ok := s.sessionUser(r); ok {
-		uid := u.ID
-		existing, err := s.store.FindFileByNameAndParts(r.Context(), &uid, name, messageIDs, s.now().UTC())
-		if err == nil {
-			if existing.Status != store.FileStatusDuplicate {
-				if err := s.store.UpdateFileStatus(r.Context(), existing.ID, store.FileStatusDuplicate); err != nil {
-					s.log.Error("mark duplicate failed", "file", existing.ID, "error", err)
-					writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-					return
-				}
-				existing.Status = store.FileStatusDuplicate
-			}
-			s.log.Info("file reused", "file", existing.Name, "id", existing.ID, "chunks", len(parts))
-			s.writeFileCreated(w, r, existing, "")
-			return
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			s.log.Error("file dedupe lookup failed", "file", name, "error", err)
-			writeJSONError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-	}
-
-	f, rawToken, err := s.newOwnedFile(r, newID(), name, fileSize, parts)
-	if err != nil {
-		s.log.Error("prepare file failed", "file", req.FileName, "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "Failed to prepare file metadata")
-		return
-	}
-	if err := s.store.CreateFile(r.Context(), f); err != nil {
-		s.log.Error("persist file failed", "file", f.Name, "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "Failed to persist file metadata")
-		return
-	}
-
-	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(fileSize), "chunks", len(parts))
+	s.log.Info("file assembled", "file", f.Name, "size", humanBytes(f.Size), "chunks", len(req.ChunkHashes))
 	s.writeFileCreated(w, r, f, rawToken)
 }

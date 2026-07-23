@@ -254,7 +254,7 @@ func scanFileMeta(row scannable) (File, error) {
 	return f, nil
 }
 
-// UpdateFileStatus sets files.status (e.g. ready → duplicate on re-upload).
+// UpdateFileStatus sets files.status (e.g. ready → reused on re-upload).
 func (s *Store) UpdateFileStatus(ctx context.Context, id, status string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE files SET status = $2 WHERE id = $1`, id, status)
 	if err != nil {

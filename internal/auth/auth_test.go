@@ -52,4 +52,14 @@ func TestDeriveKeysDomainSeparated(t *testing.T) {
 	if k.HashFileToken("tok") == a {
 		t.Fatal("session and file hashes must differ")
 	}
+	up := k.HashUploadToken("tok")
+	if up == a || up == k.HashFileToken("tok") {
+		t.Fatal("upload hash must differ from session and file")
+	}
+	if !k.UploadTokenMatch("tok", up) {
+		t.Fatal("UploadTokenMatch should accept matching token")
+	}
+	if k.UploadTokenMatch("other", up) {
+		t.Fatal("UploadTokenMatch should reject wrong token")
+	}
 }

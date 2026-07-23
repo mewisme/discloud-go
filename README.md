@@ -33,8 +33,31 @@ Production: path-proxy `/api/*`, `/f/*`, `/install.*`, `/readyz` to the API; set
 - Anonymous retention **7d** · signed-in **30d** · full `?download=1` extends +7d (cap 30d)
 - Delete removes Postgres rows only — Discord attachments stay
 - Session cookie `discloud_session`; first user on a fresh DB is `admin`
+- File `status`: `ready` (new) or `reused` (same owner re-completed identical parts)
 
-## CLI
+## Uploads
+
+Chunked **upload sessions** (preferred):
+
+1. `POST /api/uploads` → `uploadId` + `resumeToken`
+2. `HEAD`/`POST /api/chunks` (existing content-addressed store; skip known hashes)
+3. `PUT /api/uploads/{id}/parts/{idx}` with `{hash}`
+4. `POST /api/uploads/{id}/complete` (idempotent)
+5. `DELETE /api/uploads/{id}` to cancel (does **not** purge Discord blobs)
+
+Legacy `POST /api/upload/complete` with `chunkHashes` still works.  
+`GET /api/info` includes `uploads.sessions: true`.
+
+**Web:** multi-file + folder upload (relative paths preserved); IndexedDB resume after reload (re-select the same file); per-file retry.  
+**CLI:** checkpoints under the config dir `uploads/`; resume on same path+size+mtime; `discloud upload ./dir` walks a folder; `discloud upload --abort ./file` cancels the session.
+
+```bash
+discloud upload ./file.bin
+discloud upload ./my-folder
+discloud upload --abort ./file.bin
+```
+
+## CLI auth & files
 
 ```bash
 # install (from a running DisCloud)
@@ -46,7 +69,6 @@ scoop install mew/discloud-cli                       # or: brew install --cask d
 ```bash
 discloud config set --base https://api.example.com --origin https://app.example.com
 discloud auth login
-discloud upload ./file.bin
 discloud files list
 ```
 

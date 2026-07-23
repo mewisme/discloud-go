@@ -103,6 +103,7 @@ type memStore struct {
 	mu       sync.Mutex
 	files    map[string]store.File
 	chunks   map[string]store.Chunk
+	uploads  map[string]store.UploadSession
 	stats    map[string]*fileStats
 	visitors map[string]map[string]struct{}
 	users    map[string]store.User
@@ -657,8 +658,12 @@ func TestInfoReturnsChunkSizeOnly(t *testing.T) {
 	if err := json.NewDecoder(resp3.Body).Decode(&body3); err != nil {
 		t.Fatal(err)
 	}
-	if len(body3) != 1 {
-		t.Fatalf("info keys = %v, want only chunkSize", body3)
+	if len(body3) != 2 {
+		t.Fatalf("info keys = %v, want chunkSize and uploads", body3)
+	}
+	uploads, ok := body3["uploads"].(map[string]any)
+	if !ok || uploads["sessions"] != true {
+		t.Fatalf("uploads = %v", body3["uploads"])
 	}
 }
 

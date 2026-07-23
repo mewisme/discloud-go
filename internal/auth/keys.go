@@ -19,6 +19,7 @@ const MinPasswordLen = 8
 type Keys struct {
 	Session []byte
 	File    []byte
+	Upload  []byte
 	CSRF    []byte // reserved; Origin check is the primary CSRF defense
 }
 
@@ -27,6 +28,7 @@ func DeriveKeys(appSecret string) Keys {
 	return Keys{
 		Session: hmacSHA256([]byte(appSecret), []byte("discloud/session-token/v1")),
 		File:    hmacSHA256([]byte(appSecret), []byte("discloud/file-token/v1")),
+		Upload:  hmacSHA256([]byte(appSecret), []byte("discloud/upload-token/v1")),
 		CSRF:    hmacSHA256([]byte(appSecret), []byte("discloud/csrf/v1")),
 	}
 }
@@ -50,6 +52,17 @@ func (k Keys) HashFileToken(raw string) string {
 // FileTokenMatch reports whether raw hashes to wantHash (constant-time).
 func (k Keys) FileTokenMatch(raw, wantHash string) bool {
 	got := k.HashFileToken(raw)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
+}
+
+// HashUploadToken returns a hex-encoded HMAC of the raw upload resume token.
+func (k Keys) HashUploadToken(raw string) string {
+	return hex.EncodeToString(hmacSHA256(k.Upload, []byte(raw)))
+}
+
+// UploadTokenMatch reports whether raw hashes to wantHash (constant-time).
+func (k Keys) UploadTokenMatch(raw, wantHash string) bool {
+	got := k.HashUploadToken(raw)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
 }
 

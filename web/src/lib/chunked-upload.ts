@@ -1,71 +1,314 @@
 import { apiURL, type UploadResult } from "@/lib/api";
+import {
+  clearUploadRecord,
+  findUploadRecord,
+  saveUploadRecord,
+} from "@/lib/upload-session-store";
 
 /**
- * Chunked upload: split into 8 MB pieces matching the server's storage chunk
- * size, SHA-256 hash each, skip uploads the server already has, then assemble.
+ * Chunked upload via server upload sessions when available.
+ * Falls back to legacy /api/upload/complete.
  */
 const CHUNK_SIZE = 8 * 1024 * 1024;
 const DEFAULT_WORKERS = 3;
 const ATTEMPTS = 3;
 
-/** Parallel chunk POSTs (fixed; bot/worker counts are not public). */
 export async function uploadWorkers(): Promise<number> {
   return DEFAULT_WORKERS;
 }
 
+export type UploadFileOptions = {
+  relativePath?: string;
+  onProgress: (loaded: number, total: number) => void;
+  signal?: AbortSignal;
+  onProcessing?: () => void;
+  onSession?: (uploadId: string, resumeToken: string) => void;
+};
+
 export async function uploadFileChunked(
   file: File,
-  onProgress: (loaded: number, total: number) => void,
+  onProgressOrOpts:
+    | ((loaded: number, total: number) => void)
+    | UploadFileOptions,
   signal?: AbortSignal,
-  /** Fires after all chunks are up, while the server assembles the file. */
   onProcessing?: () => void,
 ): Promise<UploadResult> {
+  const opts: UploadFileOptions =
+    typeof onProgressOrOpts === "function"
+      ? { onProgress: onProgressOrOpts, signal, onProcessing }
+      : onProgressOrOpts;
+
   if (file.size === 0) throw new Error("File is empty");
   if (!crypto.subtle) {
     throw new Error("Uploads require a secure context (https or localhost)");
   }
-  throwIfAborted(signal);
+  throwIfAborted(opts.signal);
 
+  const fileName =
+    opts.relativePath?.replace(/\\/g, "/").replace(/^\/+/, "") ||
+    (typeof file.webkitRelativePath === "string" && file.webkitRelativePath
+      ? file.webkitRelativePath.replace(/\\/g, "/")
+      : file.name);
+
+  const sessions = await serverSupportsSessions(opts.signal);
+  if (!sessions) {
+    return legacyUpload(file, fileName, opts);
+  }
+  return sessionUpload(file, fileName, opts);
+}
+
+async function serverSupportsSessions(signal?: AbortSignal): Promise<boolean> {
+  try {
+    const res = await fetch(apiURL("/api/info"), {
+      credentials: "include",
+      signal,
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as {
+      uploads?: { sessions?: boolean };
+    };
+    return body.uploads?.sessions === true;
+  } catch {
+    return false;
+  }
+}
+
+async function sessionUpload(
+  file: File,
+  fileName: string,
+  opts: UploadFileOptions,
+): Promise<UploadResult> {
   const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
+  const fingerprint = `${fileName}|${file.size}|${file.lastModified}`;
+
+  let uploadId = "";
+  let resumeToken = "";
+  let skip = new Set<number>();
+
+  const existing = await findUploadRecord(fingerprint);
+  if (existing) {
+    const prog = await getUpload(
+      existing.uploadId,
+      existing.resumeToken,
+      opts.signal,
+    );
+    if (prog && (prog.status === "pending" || prog.status === "uploading")) {
+      uploadId = existing.uploadId;
+      resumeToken = existing.resumeToken;
+      skip = new Set(
+        Object.keys(prog.parts ?? {})
+          .map((k) => Number(k))
+          .filter((n) => !Number.isNaN(n)),
+      );
+      for (const idx of prog.unknownIndices ?? []) {
+        skip.delete(idx);
+      }
+    } else {
+      await clearUploadRecord(fingerprint);
+    }
+  }
+
+  if (!uploadId) {
+    const created = await createUpload(
+      fileName,
+      file.size,
+      fingerprint,
+      opts.signal,
+    );
+    uploadId = created.uploadId;
+    resumeToken = created.resumeToken;
+    await saveUploadRecord({
+      fingerprint,
+      uploadId,
+      resumeToken,
+      fileName,
+      fileSize: file.size,
+      lastModified: file.lastModified,
+      chunkCount,
+    });
+  }
+  opts.onSession?.(uploadId, resumeToken);
+
   const hashes: string[] = new Array(chunkCount);
   const loaded: number[] = new Array(chunkCount).fill(0);
   const report = () =>
-    onProgress(loaded.reduce((a, b) => a + b, 0), file.size);
+    opts.onProgress(loaded.reduce((a, b) => a + b, 0), file.size);
+
+  for (const idx of skip) {
+    const start = idx * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    loaded[idx] = end - start;
+  }
+  report();
 
   const workers = Math.min(await uploadWorkers(), chunkCount);
   let next = 0;
   async function worker(): Promise<void> {
     while (next < chunkCount) {
-      throwIfAborted(signal);
+      throwIfAborted(opts.signal);
       const idx = next++;
-      const blob = file.slice(idx * CHUNK_SIZE, Math.min((idx + 1) * CHUNK_SIZE, file.size));
+      if (skip.has(idx)) continue;
+      const blob = file.slice(
+        idx * CHUNK_SIZE,
+        Math.min((idx + 1) * CHUNK_SIZE, file.size),
+      );
+      const hash = await uploadChunkWithRetry(
+        blob,
+        (sent) => {
+          loaded[idx] = sent;
+          report();
+        },
+        opts.signal,
+      );
+      hashes[idx] = hash;
+      loaded[idx] = blob.size;
+      report();
+      await registerPart(uploadId, resumeToken, idx, hash, opts.signal);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+
+  throwIfAborted(opts.signal);
+  opts.onProcessing?.();
+  const res = await fetch(apiURL(`/api/uploads/${uploadId}/complete`), {
+    method: "POST",
+    credentials: "include",
+    headers: { "X-Upload-Token": resumeToken },
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    throw new Error(`Could not finalize upload (${res.status})`);
+  }
+  await clearUploadRecord(fingerprint);
+  return (await res.json()) as UploadResult;
+}
+
+async function legacyUpload(
+  file: File,
+  fileName: string,
+  opts: UploadFileOptions,
+): Promise<UploadResult> {
+  const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
+  const hashes: string[] = new Array(chunkCount);
+  const loaded: number[] = new Array(chunkCount).fill(0);
+  const report = () =>
+    opts.onProgress(loaded.reduce((a, b) => a + b, 0), file.size);
+
+  const workers = Math.min(await uploadWorkers(), chunkCount);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < chunkCount) {
+      throwIfAborted(opts.signal);
+      const idx = next++;
+      const blob = file.slice(
+        idx * CHUNK_SIZE,
+        Math.min((idx + 1) * CHUNK_SIZE, file.size),
+      );
       hashes[idx] = await uploadChunkWithRetry(
         blob,
         (sent) => {
           loaded[idx] = sent;
           report();
         },
-        signal,
+        opts.signal,
       );
       loaded[idx] = blob.size;
       report();
     }
   }
-  await Promise.all(Array.from({ length: workers }, worker));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
 
-  throwIfAborted(signal);
-  onProcessing?.();
+  throwIfAborted(opts.signal);
+  opts.onProcessing?.();
   const res = await fetch(apiURL("/api/upload/complete"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName: file.name, chunkHashes: hashes }),
+    body: JSON.stringify({ fileName, chunkHashes: hashes }),
     credentials: "include",
-    signal,
+    signal: opts.signal,
   });
   if (!res.ok) {
     throw new Error(`Could not finalize upload (${res.status})`);
   }
   return (await res.json()) as UploadResult;
+}
+
+async function createUpload(
+  fileName: string,
+  fileSize: number,
+  clientFingerprint: string,
+  signal?: AbortSignal,
+): Promise<{ uploadId: string; resumeToken: string }> {
+  const res = await fetch(apiURL("/api/uploads"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName, fileSize, clientFingerprint }),
+    credentials: "include",
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`Could not start upload (${res.status})`);
+  }
+  return (await res.json()) as { uploadId: string; resumeToken: string };
+}
+
+async function getUpload(
+  uploadId: string,
+  resumeToken: string,
+  signal?: AbortSignal,
+): Promise<{
+  status: string;
+  parts?: Record<string, string>;
+  unknownIndices?: number[];
+} | null> {
+  const res = await fetch(apiURL(`/api/uploads/${uploadId}`), {
+    credentials: "include",
+    headers: { "X-Upload-Token": resumeToken },
+    signal,
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as {
+    status: string;
+    parts?: Record<string, string>;
+    unknownIndices?: number[];
+  };
+}
+
+async function registerPart(
+  uploadId: string,
+  resumeToken: string,
+  idx: number,
+  hash: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(apiURL(`/api/uploads/${uploadId}/parts/${idx}`), {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Upload-Token": resumeToken,
+    },
+    body: JSON.stringify({ hash }),
+    credentials: "include",
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`Could not register part ${idx} (${res.status})`);
+  }
+}
+
+export async function cancelUploadSession(
+  uploadId: string,
+  resumeToken: string,
+): Promise<void> {
+  try {
+    await fetch(apiURL(`/api/uploads/${uploadId}`), {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "X-Upload-Token": resumeToken },
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 async function uploadChunkWithRetry(
@@ -79,7 +322,6 @@ async function uploadChunkWithRetry(
     try {
       const buf = await blob.arrayBuffer();
       const hash = await sha256Hex(buf);
-      // Skip the upload entirely if the server already has these bytes.
       const check = await fetch(apiURL(`/api/chunks/${hash}`), {
         method: "HEAD",
         credentials: "include",
@@ -96,10 +338,11 @@ async function uploadChunkWithRetry(
       }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("Chunk upload failed");
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Chunk upload failed");
 }
 
-/** XHR instead of fetch purely for upload progress events. */
 function postChunk(
   buf: ArrayBuffer,
   onChunkProgress: (sent: number) => void,

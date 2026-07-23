@@ -486,7 +486,7 @@ func ShortVis(v string) string {
 // ShortStatus returns a short file status for tables.
 func ShortStatus(v string) string {
 	switch v {
-	case "ready", "duplicate":
+	case "ready", "reused":
 		return v
 	case "":
 		return "ready"

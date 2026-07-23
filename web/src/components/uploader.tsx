@@ -38,32 +38,38 @@ import { formatBytes, formatDate, formatSpeed } from "@/lib/format";
 import {
   cancelUpload,
   dismissAllResults,
+  dismissFailed,
   dismissResult,
   enqueue,
   getState,
   removeQueued,
+  retryFailed,
   subscribe,
 } from "@/lib/upload-manager";
+import {
+  filesFromDataTransfer,
+  namedFilesFromFileList,
+} from "@/lib/folder-files";
 import { cn } from "@/lib/utils";
 
 export function Uploader() {
   const state = useSyncExternalStore(subscribe, getState, getState);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback((list: FileList | File[] | null) => {
     if (!list?.length) return;
-    enqueue(list);
+    enqueue(namedFilesFromFileList(list));
   }, []);
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      addFiles(e.dataTransfer.files);
-    },
-    [addFiles],
-  );
+  const onDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const named = await filesFromDataTransfer(e.dataTransfer);
+    enqueue(named);
+  }, []);
+
 
   const busy = Boolean(state.uploading) || state.queue.length > 0;
   const processing = state.uploading?.phase === "processing";
@@ -101,11 +107,35 @@ export function Uploader() {
           <p className="font-medium">
             {busy
               ? "Add more files to the queue"
-              : "Drop files here, or click to browse"}
+              : "Drop files or folders here, or click to browse"}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Multiple files OK. Split into 8 MB chunks automatically.
+            Multiple files and folders OK. Resumable 8 MB chunks.
           </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
+          >
+            Browse files
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              folderRef.current?.click();
+            }}
+          >
+            Browse folder
+          </Button>
         </div>
         <input
           ref={inputRef}
@@ -114,6 +144,19 @@ export function Uploader() {
           className="sr-only"
           aria-hidden
           tabIndex={-1}
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={folderRef}
+          type="file"
+          multiple
+          className="sr-only"
+          aria-hidden
+          tabIndex={-1}
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
           onChange={(e) => {
             addFiles(e.target.files);
             e.target.value = "";
@@ -228,6 +271,48 @@ export function Uploader() {
         </Card>
       )}
 
+      {state.failed.length > 0 && (
+        <Card className="w-full">
+          <CardContent className="flex flex-col gap-2">
+            <p className="text-sm font-medium">
+              Failed ({state.failed.length})
+            </p>
+            <ul className="flex flex-col gap-1.5">
+              {state.failed.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <FileIcon
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => retryFailed(item.id)}
+                  >
+                    <RotateCcw className="size-3.5" aria-hidden />
+                    Retry
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Dismiss ${item.name}`}
+                    onClick={() => dismissFailed(item.id)}
+                  >
+                    <X aria-hidden />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       {state.results.length === 1 ? (
         <ResultCard
           result={state.results[0]}
@@ -324,7 +409,7 @@ function ResultBody({
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <Badge
                 variant={
-                  result.status === "duplicate" ? "outline" : "secondary"
+                  result.status === "reused" ? "outline" : "secondary"
                 }
               >
                 {result.status ?? "ready"}
@@ -354,7 +439,7 @@ function ResultBody({
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <Badge
-            variant={result.status === "duplicate" ? "outline" : "secondary"}
+            variant={result.status === "reused" ? "outline" : "secondary"}
           >
             {result.status ?? "ready"}
           </Badge>

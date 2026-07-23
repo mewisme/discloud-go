@@ -46,6 +46,16 @@ type Store interface {
 	DeleteFile(ctx context.Context, id string) error
 	DeleteExpiredFiles(ctx context.Context, now time.Time, limit int) (int64, error)
 	ExtendExpiration(ctx context.Context, id string, now time.Time, ext, capDur time.Duration) (time.Time, error)
+	CreateUploadSession(ctx context.Context, u store.UploadSession) error
+	GetUploadSession(ctx context.Context, id string) (store.UploadSession, error)
+	CountOpenUploadSessionsByOwner(ctx context.Context, ownerUserID string) (int64, error)
+	CountOpenUploadSessionsAnon(ctx context.Context, fingerprintPrefix string) (int64, error)
+	RegisterUploadPart(ctx context.Context, uploadID string, idx int, hash string, now time.Time) error
+	BeginUploadComplete(ctx context.Context, uploadID string, now time.Time) (store.UploadSession, error)
+	FinishUploadComplete(ctx context.Context, uploadID, fileID string, now time.Time) error
+	AbortUploadComplete(ctx context.Context, uploadID string, now time.Time) error
+	CancelUploadSession(ctx context.Context, uploadID string, now time.Time) error
+	ExpireUploadSessions(ctx context.Context, now time.Time, limit int) (int64, error)
 	Ping(ctx context.Context) error
 }
 
@@ -125,6 +135,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/chunks/{hash}", s.handleChunkCheck)
 	mux.HandleFunc("POST /api/chunks", s.handleChunkUpload)
 	mux.HandleFunc("POST /api/upload/complete", s.handleUploadComplete)
+	mux.HandleFunc("POST /api/uploads", s.handleCreateUpload)
+	mux.HandleFunc("GET /api/uploads/{id}", s.handleGetUpload)
+	mux.HandleFunc("PUT /api/uploads/{id}/parts/{idx}", s.handleRegisterUploadPart)
+	mux.HandleFunc("POST /api/uploads/{id}/parts", s.handleRegisterUploadParts)
+	mux.HandleFunc("POST /api/uploads/{id}/complete", s.handleCompleteUploadSession)
+	mux.HandleFunc("DELETE /api/uploads/{id}", s.handleCancelUpload)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/{id}", s.handleGetFile)
 	mux.HandleFunc("GET /api/files/{id}/inspect", s.handleInspect)
@@ -163,6 +179,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"chunkSize": chunkSize,
+		"uploads": map[string]any{
+			"sessions":    true,
+			"maxFileSize": int64(maxChunksPerFile) * chunkSize,
+		},
 	})
 }
 

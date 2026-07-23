@@ -12,7 +12,14 @@ const (
 	cleanupInterval        = time.Hour
 	cleanupBatchSize       = 100
 
+	uploadSessionAnonTTL  = 24 * time.Hour
+	uploadSessionAuthTTL  = 48 * time.Hour
+	maxOpenUploadSessions = 20
+	maxPathDepth          = 32
+	maxFileNameLen        = 512
+
 	sessionCookieName = "discloud_session"
+	uploadTokenHeader = "X-Upload-Token"
 
 	authRateLimit       = 10
 	authRateLimitWindow = 15 * time.Minute

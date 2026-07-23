@@ -1107,8 +1107,8 @@ func TestUploadCompleteReusesOnlyForSameUser(t *testing.T) {
 	if alice2 != alice1 {
 		t.Fatalf("same user re-upload: got %s, want reused %s", alice2, alice1)
 	}
-	if st2 != "duplicate" {
-		t.Fatalf("status = %q, want duplicate", st2)
+	if st2 != "reused" {
+		t.Fatalf("status = %q, want reused", st2)
 	}
 
 	post(bob)

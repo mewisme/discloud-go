@@ -24,8 +24,8 @@ const (
 
 // File status values for files.status (upload outcome badge).
 const (
-	FileStatusReady     = "ready"
-	FileStatusDuplicate = "duplicate"
+	FileStatusReady  = "ready"
+	FileStatusReused = "reused"
 )
 
 // ErrConflict is returned for unique constraint violations (e.g. username).

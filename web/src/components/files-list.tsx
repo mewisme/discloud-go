@@ -135,7 +135,7 @@ function ownedColumns(actions: OwnedActions): ColumnDef<OwnedFile>[] {
       cell: ({ row }) => {
         const status = row.original.status ?? "ready";
         return (
-          <Badge variant={status === "duplicate" ? "outline" : "secondary"}>
+          <Badge variant={status === "reused" ? "outline" : "secondary"}>
             {status}
           </Badge>
         );

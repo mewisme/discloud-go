@@ -1,8 +1,9 @@
 import { toast } from "sonner";
 
 import { stripTokenFromURL, withPublicURLs, type UploadResult } from "@/lib/api";
-import { isAbortError, uploadFileChunked } from "@/lib/chunked-upload";
+import { isAbortError, cancelUploadSession, uploadFileChunked } from "@/lib/chunked-upload";
 import { rememberLocalFile } from "@/lib/local-files";
+import type { NamedFile } from "@/lib/folder-files";
 
 export type QueuedItem = { id: string; name: string; size: number };
 
@@ -29,9 +30,11 @@ export type UploadManagerState = {
   remoteQueue: number;
   /** Completed uploads this session (newest first). */
   results: UploadResult[];
+  /** Failed jobs that can be retried (same File still held). */
+  failed: QueuedItem[];
 };
 
-type Job = { id: string; file: File };
+type Job = { id: string; file: File; relativePath?: string };
 
 type Listener = (state: UploadManagerState) => void;
 
@@ -68,6 +71,7 @@ let uploading: UploadManagerState["uploading"] = null;
 let results: UploadResult[] = [];
 let remoteQueue = 0;
 let jobs: Job[] = [];
+let failedJobs: Job[] = [];
 let running = false;
 let abortCtrl: AbortController | null = null;
 let ownerId: string | null = null;
@@ -82,6 +86,7 @@ let cached: UploadManagerState = {
   queue: [],
   remoteQueue: 0,
   results: [],
+  failed: [],
 };
 
 /** Newest-first upsert; keeps peer/local results without dropping siblings. */
@@ -117,7 +122,7 @@ function ensureTabId(): string {
 function queueView(): QueuedItem[] {
   return jobs.map((j) => ({
     id: j.id,
-    name: j.file.name,
+    name: j.relativePath || j.file.name,
     size: j.file.size,
   }));
 }
@@ -129,6 +134,11 @@ function snapshot(): UploadManagerState {
     queue: queueView(),
     remoteQueue: ownerId === ensureTabId() ? 0 : remoteQueue,
     results,
+    failed: failedJobs.map((j) => ({
+      id: j.id,
+      name: j.relativePath || j.file.name,
+      size: j.file.size,
+    })),
   };
   return cached;
 }
@@ -354,10 +364,14 @@ async function pump(): Promise<void> {
 
   running = true;
   abortCtrl = new AbortController();
+  const sessionBox: {
+    current: { uploadId: string; resumeToken: string } | null;
+  } = { current: null };
   const id = ensureTabId();
   ownerId = id;
+  const displayName = next.relativePath || next.file.name;
   uploading = {
-    fileName: next.file.name,
+    fileName: displayName,
     percent: 0,
     phase: "uploading",
     sent: 0,
@@ -372,9 +386,13 @@ async function pump(): Promise<void> {
   let lastUIPublish = 0;
 
   try {
-    const result = await uploadFileChunked(
-      next.file,
-      (sent, total) => {
+    const result = await uploadFileChunked(next.file, {
+      relativePath: next.relativePath,
+      signal: abortCtrl.signal,
+      onSession: (uploadId, resumeToken) => {
+        sessionBox.current = { uploadId, resumeToken };
+      },
+      onProgress: (sent, total) => {
         const t = now();
         if (t - speedAt >= 300) {
           const dt = (t - speedAt) / 1000;
@@ -385,13 +403,12 @@ async function pump(): Promise<void> {
         const percent = total > 0 ? Math.round((sent / total) * 100) : 0;
         const samePct =
           percent === lastPublishedPercent &&
-          uploading?.fileName === next.file.name &&
+          uploading?.fileName === displayName &&
           uploading.phase === "uploading";
-        // Throttle UI while percent is flat; still refresh ~5 Hz for MB/s.
         if (samePct && t - lastUIPublish < 200) return;
         lastUIPublish = t;
         uploading = {
-          fileName: next.file.name,
+          fileName: displayName,
           percent,
           phase: "uploading",
           sent,
@@ -400,10 +417,9 @@ async function pump(): Promise<void> {
         };
         publish();
       },
-      abortCtrl.signal,
-      () => {
+      onProcessing: () => {
         uploading = {
-          fileName: next.file.name,
+          fileName: displayName,
           percent: 100,
           phase: "processing",
           sent: next.file.size,
@@ -412,7 +428,7 @@ async function pump(): Promise<void> {
         };
         publish();
       },
-    );
+    });
     const publicResult = withPublicURLs(result);
     rememberLocalFile(publicResult);
     window.dispatchEvent(new Event("discloud:files"));
@@ -420,11 +436,15 @@ async function pump(): Promise<void> {
     toast.success(`${publicResult.fileName} uploaded`);
   } catch (err: unknown) {
     if (isAbortError(err)) {
-      toast.message(`Cancelled ${next.file.name}`);
+      const s = sessionBox.current;
+      if (s) {
+        void cancelUploadSession(s.uploadId, s.resumeToken);
+      }
+      toast.message(`Cancelled ${displayName}`);
     } else {
+      failedJobs = [next, ...failedJobs.filter((j) => j.id !== next.id)];
       toast.error(err instanceof Error ? err.message : "Upload failed", {
-        description:
-          "Retrying the upload will skip chunks that already made it through.",
+        description: "Use Retry on the failed item to resume.",
       });
     }
   } finally {
@@ -451,27 +471,39 @@ export function subscribe(listener: Listener): () => void {
 }
 
 /** Enqueue one or more files. Safe to call while uploads are running. */
-export function enqueue(files: Iterable<File>): void {
+export function enqueue(files: Iterable<File> | Iterable<NamedFile>): void {
   syncFromPeers();
-  const list = [...files].filter((f) => f.size > 0);
+  const named: NamedFile[] = [];
+  for (const item of files) {
+    if (item instanceof File) {
+      named.push({
+        file: item,
+        relativePath: item.webkitRelativePath || undefined,
+      });
+    } else if (item && typeof item === "object" && "file" in item) {
+      named.push(item as NamedFile);
+    }
+  }
+  const list = named.filter((n) => n.file.size > 0);
   if (list.length === 0) {
     toast.error("No non-empty files selected");
     return;
   }
 
-  for (const file of list) {
+  for (const { file, relativePath } of list) {
     jobs.push({
       id:
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `${file.name}-${file.size}-${Math.random()}`,
       file,
+      relativePath,
     });
   }
 
   toast.message(
     list.length === 1
-      ? `Queued ${list[0].name}`
+      ? `Queued ${list[0].relativePath || list[0].file.name}`
       : `Queued ${list.length} files`,
   );
   publish();
@@ -494,6 +526,24 @@ export function removeQueued(id: string): void {
 export function cancelUpload(): void {
   syncFromPeers();
   abortCtrl?.abort();
+}
+
+/** Re-queue a failed upload for resume. */
+export function retryFailed(id: string): void {
+  syncFromPeers();
+  const job = failedJobs.find((j) => j.id === id);
+  if (!job) return;
+  failedJobs = failedJobs.filter((j) => j.id !== id);
+  jobs.push(job);
+  publish();
+  void pump();
+}
+
+export function dismissFailed(id: string): void {
+  syncFromPeers();
+  const before = failedJobs.length;
+  failedJobs = failedJobs.filter((j) => j.id !== id);
+  if (failedJobs.length !== before) publish();
 }
 
 export function dismissResult(fileId: string): void {

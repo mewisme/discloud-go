@@ -514,19 +514,28 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RunCleanup deletes expired files periodically until ctx is cancelled.
+// RunCleanup deletes expired files and expires abandoned upload sessions
+// periodically until ctx is cancelled.
 func (s *Server) RunCleanup(ctx context.Context) {
 	run := func() {
-		n, err := s.store.DeleteExpiredFiles(ctx, s.now().UTC(), cleanupBatchSize)
+		now := s.now().UTC()
+		n, err := s.store.DeleteExpiredFiles(ctx, now, cleanupBatchSize)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			s.log.Error("cleanup failed", "error", err)
-			return
-		}
-		if n > 0 {
+		} else if n > 0 {
 			s.log.Info("cleanup", "deleted", n)
+		}
+		un, err := s.store.ExpireUploadSessions(ctx, now, cleanupBatchSize)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			s.log.Error("upload session expire failed", "error", err)
+		} else if un > 0 {
+			s.log.Info("upload sessions expired", "count", un)
 		}
 	}
 	// Shortly after start.

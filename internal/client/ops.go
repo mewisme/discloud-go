@@ -10,9 +10,13 @@ import (
 	"strconv"
 )
 
-// Info is public upload config from GET /api/info (chunk size only).
+// Info is public upload config from GET /api/info.
 type Info struct {
 	ChunkSize int64 `json:"chunkSize"`
+	Uploads   *struct {
+		Sessions    bool  `json:"sessions"`
+		MaxFileSize int64 `json:"maxFileSize"`
+	} `json:"uploads"`
 }
 
 // GetInfo fetches public upload sizing (chunkSize).

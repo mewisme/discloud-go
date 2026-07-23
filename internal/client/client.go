@@ -211,6 +211,11 @@ func (c *Client) Do(method, path string, body io.Reader, contentType string) (*h
 
 // DoJSON sends JSON and decodes a JSON response into dst (nil ok for 204).
 func (c *Client) DoJSON(method, path string, in any, dst any) error {
+	return c.DoJSONUploadToken(method, path, in, dst, "")
+}
+
+// DoJSONUploadToken sends JSON; when token is non-empty sets X-Upload-Token.
+func (c *Client) DoJSONUploadToken(method, path string, in any, dst any, token string) error {
 	var body io.Reader
 	ct := ""
 	if in != nil {
@@ -221,12 +226,48 @@ func (c *Client) DoJSON(method, path string, in any, dst any) error {
 		body = bytes.NewReader(b)
 		ct = "application/json"
 	}
-	res, err := c.Do(method, path, body, ct)
+	headers := map[string]string{}
+	if token != "" {
+		headers["X-Upload-Token"] = token
+	}
+	res, err := c.doWithHeaders(method, path, body, ct, headers)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 	return decodeResponse(res, dst)
+}
+
+func (c *Client) doWithHeaders(method, path string, body io.Reader, contentType string, headers map[string]string) (*http.Response, error) {
+	ref, err := url.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	u := c.base.ResolveReference(ref)
+	req, err := http.NewRequest(method, u.String(), body)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	req.Header.Set("User-Agent", "discloud-cli")
+	mutating := method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
+	if mutating {
+		req.Header.Set("Origin", c.cfg.Origin)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.saveCookies(); err != nil {
+		res.Body.Close()
+		return nil, err
+	}
+	return res, nil
 }
 
 func decodeResponse(res *http.Response, dst any) error {

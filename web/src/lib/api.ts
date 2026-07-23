@@ -38,7 +38,7 @@ export type AccountMe = {
 };
 
 /** Upload outcome badge on a file record. */
-export type FileStatus = "ready" | "duplicate";
+export type FileStatus = "ready" | "reused";
 
 /** Shared file link payload from upload / file APIs. */
 export interface FileLinks {
