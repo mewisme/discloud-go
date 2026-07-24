@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -234,7 +233,7 @@ func TestUploadSessionRequiresToken(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
-	_ = fmt.Sprintf("ok")
+	_ = "ok"
 }
 
 func TestUploadSessionExpire(t *testing.T) {

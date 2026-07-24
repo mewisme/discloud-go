@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"charm.land/huh/v2"
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/ncruces/zenity"
@@ -46,11 +47,11 @@ func newUploadCmd() *cobra.Command {
 
 			paths := args
 			if len(paths) == 0 {
-				one, err := promptArg("", "Path")
+				var err error
+				paths, err = promptUploadPaths()
 				if err != nil {
 					return err
 				}
-				paths = []string{one}
 			}
 
 			jobs, err := expandUploadPaths(paths)
@@ -116,6 +117,59 @@ type uploadJob struct {
 	path       string
 	remoteName string
 	size       int64
+}
+
+// acceptUploadPath appends a trimmed path after Stat, or done=true on empty line.
+func acceptUploadPath(paths []string, line string) (out []string, done bool, err error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return paths, true, nil
+	}
+	if _, err := os.Stat(line); err != nil {
+		return paths, false, err
+	}
+	return append(paths, line), false, nil
+}
+
+func promptUploadPaths() ([]string, error) {
+	if flagJSON {
+		return nil, fmt.Errorf("path is required with --json")
+	}
+	if !ui.IsTTY(os.Stdin) {
+		return nil, fmt.Errorf("path is required")
+	}
+	var paths []string
+	for {
+		var v string
+		n := len(paths) + 1
+		err := huh.NewInput().
+			Title(fmt.Sprintf("Path #%d", n)).
+			Description("Enter a file or folder path; leave empty to start upload").
+			Value(&v).
+			Validate(func(s string) error {
+				_, done, err := acceptUploadPath(nil, s)
+				if done {
+					return nil
+				}
+				return err
+			}).
+			Run()
+		if err != nil {
+			return nil, err
+		}
+		var done bool
+		paths, done, err = acceptUploadPath(paths, v)
+		if err != nil {
+			return nil, err
+		}
+		if done {
+			break
+		}
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("at least one path is required")
+	}
+	return paths, nil
 }
 
 func expandUploadPaths(paths []string) ([]uploadJob, error) {
@@ -212,8 +266,12 @@ func uploadJobs(c *client.Client, jobs []uploadJob, workers int) error {
 		}
 		items = append(items, item)
 	}
+	canceled := ctx.Err() != nil
 	if prog != nil {
 		prog.Wait()
+	}
+	if canceled || isUserAbort(firstErr) {
+		return nil
 	}
 	if firstErr != nil {
 		return firstErr

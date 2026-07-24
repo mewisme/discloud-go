@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"runtime"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
+	"github.com/ncruces/zenity"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +36,7 @@ func newRootCmd() *cobra.Command {
 	}
 	cmd.SetVersionTemplate("{{.Version}}\n")
 	cmd.PersistentFlags().StringVar(&flagBase, "base", "", "API origin (env DISCLOUD_BASE)")
-	cmd.PersistentFlags().StringVar(&flagOrigin, "origin", "", "WEB_ORIGIN for CSRF (env DISCLOUD_ORIGIN)")
+	cmd.PersistentFlags().StringVar(&flagOrigin, "origin", "", "must match server DISCLOUD_CORS for CSRF (env DISCLOUD_ORIGIN)")
 	cmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "emit one JSON document on stdout")
 
 	cmd.AddCommand(
@@ -94,9 +99,32 @@ func writeJSON(v any) error {
 func runE(fn func(cmd *cobra.Command, args []string) error) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		err := fn(cmd, args)
-		if err != nil {
-			ui.PrintError(err)
+		if err == nil {
+			return nil
 		}
+		if isUserAbort(err) {
+			// Silent exit 0 — avoid "exit status 1" from go run / shells.
+			return nil
+		}
+		ui.PrintError(err)
 		return err
 	}
+}
+
+func isUserAbort(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, huh.ErrUserAborted) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, tea.ErrInterrupted) ||
+		errors.Is(err, zenity.ErrCanceled) {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return msg == "aborted" ||
+		strings.Contains(msg, "user aborted") ||
+		strings.Contains(msg, "dialog canceled") ||
+		strings.Contains(msg, "context canceled") ||
+		strings.Contains(msg, "program was interrupted")
 }

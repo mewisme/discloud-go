@@ -45,14 +45,12 @@ func (c *Client) SignOut() error {
 	return err
 }
 
-// Me returns the account dashboard payload.
 func (c *Client) Me() (map[string]any, error) {
 	var out map[string]any
 	err := c.DoJSON(http.MethodGet, "/api/auth/me", nil, &out)
 	return out, err
 }
 
-// ChangePassword updates the password (204).
 func (c *Client) ChangePassword(current, next string) error {
 	return c.DoJSON(http.MethodPost, "/api/auth/password", map[string]string{
 		"currentPassword": current,
@@ -81,7 +79,6 @@ func (c *Client) ListAPITokens() (map[string]any, error) {
 	return out, err
 }
 
-// RevokeAPIToken revokes a PAT by id (204).
 func (c *Client) RevokeAPIToken(id string) error {
 	return c.DoJSON(http.MethodDelete, "/api/auth/tokens/"+id, nil, nil)
 }

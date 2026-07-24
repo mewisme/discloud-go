@@ -283,6 +283,28 @@ func TestPadRight(t *testing.T) {
 	}
 }
 
+func TestCenterLines(t *testing.T) {
+	t.Parallel()
+	// Shared pad from widest line ("abcd"=4): pad=(10-4)/2=3 for every line.
+	in := "ab\nabcd\n"
+	got := centerLines(in, 10)
+	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+	if lines[0] != "   ab" {
+		t.Fatalf("line0=%q want shared pad", lines[0])
+	}
+	if lines[1] != "   abcd" {
+		t.Fatalf("line1=%q", lines[1])
+	}
+	// odd width floors to even (11 → 10)
+	if got := centerLines(in, 11); got != centerLines(in, 10) {
+		t.Fatalf("odd width mismatch:\n%q\n%q", got, centerLines(in, 10))
+	}
+	// wider than term: no negative pad
+	if got := centerLines("abcdefghij", 4); !strings.HasPrefix(got, "abcdefghij") {
+		t.Fatalf("overflow=%q", got)
+	}
+}
+
 func TestDisplayWidthGlyph(t *testing.T) {
 	t.Parallel()
 	if displayWidth(IconOK) != 1 {

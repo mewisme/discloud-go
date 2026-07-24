@@ -18,10 +18,9 @@ import (
 
 const sessionCookie = "discloud_session"
 
-// Config holds API client settings.
 type Config struct {
 	BaseURL    string // API origin, e.g. http://localhost:8080
-	Origin     string // WEB_ORIGIN for CSRF, e.g. http://localhost:3000
+	Origin     string // must match server DISCLOUD_CORS for CSRF, e.g. http://localhost:3000
 	CookiePath string // cookie jar file; empty → default path
 	Token      string // personal access token (Bearer); env DISCLOUD_TOKEN / config.json
 }
@@ -162,7 +161,6 @@ func writeConfigFile(path string, f configFile) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// Error is an API error with HTTP status and message body.
 type Error struct {
 	Status  int
 	Message string
@@ -175,7 +173,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("request failed (%d)", e.Status)
 }
 
-// Client talks to a DisCloud API instance.
 type Client struct {
 	cfg  Config
 	http *http.Client
@@ -217,10 +214,8 @@ func New(cfg Config) (*Client, error) {
 	return c, nil
 }
 
-// Config returns a copy of the client config.
 func (c *Client) Config() Config { return c.cfg }
 
-// hasSessionCookie reports whether the jar has a non-empty discloud_session.
 func (c *Client) hasSessionCookie() bool {
 	for _, ck := range c.jar.Cookies(c.base) {
 		if ck.Name == sessionCookie && strings.TrimSpace(ck.Value) != "" {
@@ -389,7 +384,6 @@ func (c *Client) saveCookies() error {
 	return os.WriteFile(c.cfg.CookiePath, data, 0o600)
 }
 
-// ClearSession removes persisted cookies.
 func (c *Client) ClearSession() error {
 	c.jar.SetCookies(c.base, []*http.Cookie{{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1}})
 	if c.cfg.CookiePath == "" {

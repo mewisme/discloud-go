@@ -298,7 +298,6 @@ type Chunk struct {
 	Size      int64
 }
 
-// HasChunk reports whether a chunk with this hash was already uploaded.
 func (s *Store) HasChunk(ctx context.Context, hash string) (bool, error) {
 	var exists bool
 	err := s.pool.QueryRow(ctx,
@@ -357,7 +356,6 @@ func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chun
 	return out, nil
 }
 
-// ListFilesByOwner returns files owned by ownerID, newest first.
 func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]File, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,

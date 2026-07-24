@@ -56,12 +56,10 @@ export type AdminOverview = {
   deps: { postgres: boolean; valkey: boolean };
 };
 
-/** Upload outcome badge on a file record. */
 export type FileStatus = "ready" | "reused";
 
 export type ShareMode = "view" | "download";
 
-/** Shared file link payload from upload / file APIs. */
 export interface FileLinks {
   fileId: string;
   fileName: string;
@@ -214,7 +212,7 @@ export function stripTokenFromURL(raw: string): string {
   }
 }
 
-/** Rebuild share links from the runtime API origin (API_URL inject). */
+/** Rebuild share links from the runtime API origin (DISCLOUD_API_URL inject). */
 export function withPublicURLs(result: UploadResult): UploadResult {
   const id = result.fileId;
   const name = result.fileName;

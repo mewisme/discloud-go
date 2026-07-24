@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $repo = 'mewisme/discloud-go'
 $installDir = if ($env:DISCLOUD_INSTALL_DIR) { $env:DISCLOUD_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'discloud' }
 
-# Defaults from the API that served this script (API_URL / WEB_ORIGIN).
+# Defaults from the API that served this script (DISCLOUD_API_URL / DISCLOUD_CORS).
 $DefaultBase = '{{DISCLOUD_BASE}}'
 $DefaultOrigin = '{{DISCLOUD_ORIGIN}}'
 

@@ -9,10 +9,9 @@ import (
 // pickerSafetyLimit caps how many files interactive selection will load.
 const pickerSafetyLimit = 500
 
-// pageSize is the page size used when fetching for the picker (server max 200).
+// pickerPageSize is the page size used when fetching for the picker (server max 200).
 const pickerPageSize = 100
 
-// FileItem is a file metadata / links payload from the API.
 type FileItem struct {
 	FileID             string    `json:"fileId"`
 	FileName           string    `json:"fileName"`
@@ -40,7 +39,6 @@ type FilesList struct {
 	Files []FileItem `json:"files"`
 }
 
-// AuthUser is signup/signin response.
 type AuthUser struct {
 	ID                string    `json:"id"`
 	Username          string    `json:"username"`
@@ -50,7 +48,6 @@ type AuthUser struct {
 	DefaultVisibility string    `json:"defaultVisibility,omitempty"`
 }
 
-// MeStats is the stats object inside MeResponse.
 type MeStats struct {
 	FileCount         int64 `json:"fileCount"`
 	TotalBytes        int64 `json:"totalBytes"`
@@ -59,7 +56,6 @@ type MeStats struct {
 	ExpiringSoonCount int64 `json:"expiringSoonCount"`
 }
 
-// MeSession is the session object inside MeResponse.
 type MeSession struct {
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeenAt time.Time `json:"lastSeenAt"`
@@ -125,13 +121,11 @@ type InspectResponse struct {
 	LongDownloadURL    string     `json:"longDownloadURL"`
 }
 
-// ChunkPutResult is chunks put output.
 type ChunkPutResult struct {
 	Hash    string `json:"hash"`
 	Existed bool   `json:"existed"`
 }
 
-// ChunkExistsResult is chunks check output.
 type ChunkExistsResult struct {
 	Exists bool `json:"exists"`
 }

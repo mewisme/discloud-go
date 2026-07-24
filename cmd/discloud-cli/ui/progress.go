@@ -27,13 +27,11 @@ const (
 	minBarWidth         = 10
 )
 
-// ProgressFile is one file row for NewUploadProgress.
 type ProgressFile struct {
 	Name  string
 	Total int64
 }
 
-// ProgressLayout is the shared filename column width for a progress group.
 type ProgressLayout struct {
 	NameWidth int
 }
@@ -188,11 +186,13 @@ type fileDoneMsg struct{ id int }
 
 type fileAbortMsg struct{ id int }
 
-// hideProgressMsg clears the inline progress area, then quits.
+// hideProgressMsg clears the inline progress area, then quits (no cancel).
 // tea.QuitMsg alone exits before Update/render, so the last frame would stick.
 type hideProgressMsg struct{}
 
-// progressModel is the Bubble Tea model for multi-file upload progress.
+// userCancelMsg is Ctrl+C / Esc / SIGINT: cancel upload context, then quit.
+type userCancelMsg struct{}
+
 type progressModel struct {
 	rows     []fileRow
 	layout   ProgressLayout
@@ -274,6 +274,11 @@ func (m *progressModel) requestCancel() tea.Cmd {
 	return tea.Quit
 }
 
+func (m *progressModel) hideAndQuit() tea.Cmd {
+	m.quitting = true
+	return tea.Quit
+}
+
 func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -318,7 +323,8 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r.status = statusAborted
 		}
 	case hideProgressMsg:
-		// Used for normal Wait() cleanup and for InterruptMsg (via WithFilter).
+		return m, m.hideAndQuit()
+	case userCancelMsg:
 		return m, m.requestCancel()
 	}
 	return m, nil
@@ -400,7 +406,6 @@ type UploadProgress struct {
 	cancel context.CancelFunc
 }
 
-// FileBar is one file's progress handle.
 type FileBar struct {
 	id    int
 	p     *tea.Program
@@ -429,11 +434,11 @@ func NewUploadProgress(w io.Writer, files []ProgressFile) *UploadProgress {
 		// terminal replies with DECRPM (e.g. "?2027;3$y"). WithInput(nil)
 		// leaves that reply in the console buffer → PowerShell "autofills" it.
 		tea.WithInput(os.Stdin),
-		// Turn SIGINT into a clean hide+cancel instead of ErrInterrupted
+		// Turn SIGINT into userCancelMsg instead of ErrInterrupted
 		// (which would exit tea without cancelling the upload goroutine).
 		tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
 			if _, ok := msg.(tea.InterruptMsg); ok {
-				return hideProgressMsg{}
+				return userCancelMsg{}
 			}
 			return msg
 		}),
@@ -468,7 +473,6 @@ func progressTermWidth(w io.Writer) int {
 	return defaultTermWidth
 }
 
-// Bar returns the i-th file bar (nil if out of range).
 func (u *UploadProgress) Bar(i int) *FileBar {
 	if u == nil || i < 0 || i >= len(u.bars) {
 		return nil
@@ -487,7 +491,6 @@ func (u *UploadProgress) Wait() {
 	})
 }
 
-// Update sets absolute sent bytes.
 func (f *FileBar) Update(sent, _ int64) {
 	if f == nil || f.p == nil {
 		return
@@ -503,7 +506,6 @@ func (f *FileBar) Update(sent, _ int64) {
 	f.p.Send(fileProgressMsg{id: f.id, sent: sent})
 }
 
-// Done marks the bar complete at 100%.
 func (f *FileBar) Done() {
 	if f == nil || f.p == nil {
 		return

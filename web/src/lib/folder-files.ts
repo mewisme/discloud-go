@@ -1,5 +1,3 @@
-/** Collect File objects (with relative paths) from a folder drag or input. */
-
 export type NamedFile = { file: File; relativePath?: string };
 
 export async function filesFromDataTransfer(

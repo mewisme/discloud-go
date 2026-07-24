@@ -47,7 +47,6 @@ type Inspect struct {
 	LongDownloadURL   string
 }
 
-// KVBlock is one labeled section inside a combined FIELD/VALUE table.
 type KVBlock struct {
 	Title string
 	Rows  [][]string
@@ -205,7 +204,6 @@ func spanInner(widths []int) int {
 	return inner
 }
 
-// PrintFileTable prints a file listing table.
 func PrintFileTable(w io.Writer, files []File) error {
 	headers := []string{"ID", "NAME", "SIZE", "STATUS", "VISIBILITY", "EXPIRES"}
 	rows := make([][]string, len(files))
@@ -222,13 +220,11 @@ func PrintFileTable(w io.Writer, files []File) error {
 	return printTable(w, headers, rows, []bool{false, false, true, false, false, false}, 1, 0)
 }
 
-// UploadRow is one successful upload for PrintUploadTable.
 type UploadRow struct {
 	Name, ID, SHA256, AccessToken, Status string
 	Size                                  int64
 }
 
-// PrintUploadTable prints the post-upload summary table.
 func PrintUploadTable(w io.Writer, items []UploadRow) error {
 	if len(items) == 0 {
 		return nil
@@ -274,7 +270,6 @@ func PrintUploadTable(w io.Writer, items []UploadRow) error {
 	return printTable(w, headers, rows, right, prefer...)
 }
 
-// PrintInspect prints file analytics as KV blocks.
 func PrintInspect(w io.Writer, item Inspect) error {
 	last := "-"
 	if item.LastAccessAt != nil && !item.LastAccessAt.IsZero() {
@@ -333,7 +328,6 @@ func shareDownloadLine(item Inspect) string {
 	return fmt.Sprintf("%d / %d", item.DownloadCount, *item.MaxDownloads)
 }
 
-// contentWidths returns max terminal display width per column.
 func contentWidths(headers []string, rows [][]string) []int {
 	widths := make([]int, len(headers))
 	for i, h := range headers {
@@ -539,7 +533,6 @@ func termWidth(w io.Writer) int {
 	return width
 }
 
-// ShortVis returns a short visibility string for tables.
 func ShortVis(v string) string {
 	switch v {
 	case "private", "public":
@@ -549,7 +542,7 @@ func ShortVis(v string) string {
 	}
 }
 
-// ShortStatus returns a short file status for tables.
+// ShortStatus maps API status for tables; empty means ready.
 func ShortStatus(v string) string {
 	switch v {
 	case "ready", "reused":

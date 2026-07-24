@@ -17,4 +17,4 @@ Include steps to reproduce, impact, and any suggested fix. You should receive an
 
 ## Scope notes
 
-DisCloud stores file chunks as Discord attachments. Keep `DISCORD_BOT_TOKEN` and database credentials out of commits and public logs. Rotate any token that may have been exposed.
+DisCloud stores file chunks as Discord attachments. Keep `DISCLOUD_BOT_TOKEN` and database credentials out of commits and public logs. Rotate any token that may have been exposed.

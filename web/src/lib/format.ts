@@ -10,7 +10,6 @@ export function formatBytes(bytes: number): string {
   return `${unit === 0 ? value : value.toFixed(2)} ${UNITS[unit]}`;
 }
 
-/** Throughput for upload UI (e.g. "3.20 MB/s"). */
 export function formatSpeed(bytesPerSec: number): string {
   if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "—";
   return `${formatBytes(bytesPerSec)}/s`;

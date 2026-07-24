@@ -17,7 +17,7 @@ REPO="mewisme/discloud-go"
 INSTALL_DIR="${DISCLOUD_INSTALL_DIR:-$HOME/.discloud}"
 BIN_DIR="${DISCLOUD_BIN_DIR:-$HOME/.local/bin}"
 
-# Defaults from the API that served this script (API_URL / WEB_ORIGIN).
+# Defaults from the API that served this script (DISCLOUD_API_URL / DISCLOUD_CORS).
 DEFAULT_DISCLOUD_BASE="{{DISCLOUD_BASE}}"
 DEFAULT_DISCLOUD_ORIGIN="{{DISCLOUD_ORIGIN}}"
 

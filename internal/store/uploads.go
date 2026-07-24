@@ -42,7 +42,6 @@ type UploadSession struct {
 	Parts             map[int]string // idx → chunk hash (registered only)
 }
 
-// CreateUploadSession inserts a new pending upload session.
 func (s *Store) CreateUploadSession(ctx context.Context, u UploadSession) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO upload_sessions (
@@ -54,7 +53,6 @@ func (s *Store) CreateUploadSession(ctx context.Context, u UploadSession) error 
 	return err
 }
 
-// GetUploadSession loads a session and its registered parts.
 func (s *Store) GetUploadSession(ctx context.Context, id string) (UploadSession, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, owner_user_id, resume_token_hash, file_name, file_size, chunk_size, chunk_count,

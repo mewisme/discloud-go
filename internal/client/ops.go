@@ -19,14 +19,12 @@ type Info struct {
 	} `json:"uploads"`
 }
 
-// GetInfo fetches public upload sizing (chunkSize).
 func (c *Client) GetInfo() (Info, error) {
 	var out Info
 	err := c.DoJSON(http.MethodGet, "/api/info", nil, &out)
 	return out, err
 }
 
-// Health returns the /healthz body.
 func (c *Client) Health() (string, error) {
 	res, err := c.Do(http.MethodGet, "/healthz", nil, "")
 	if err != nil {
@@ -43,7 +41,6 @@ func (c *Client) Health() (string, error) {
 	return string(b), nil
 }
 
-// Ready checks /readyz.
 func (c *Client) Ready() (string, error) {
 	res, err := c.Do(http.MethodGet, "/readyz", nil, "")
 	if err != nil {
@@ -185,7 +182,6 @@ func (c *Client) PutChunk(data []byte) (hash string, existed bool, err error) {
 	return out.Hash, out.Existed, nil
 }
 
-// FormatBytes is a tiny helper for progress lines.
 func FormatBytes(n int64) string {
 	const unit = 1024
 	if n < unit {

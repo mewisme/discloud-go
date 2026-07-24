@@ -15,7 +15,7 @@ import (
 
 const MinPasswordLen = 8
 
-// Keys holds domain-separated HMAC keys derived from APP_SECRET.
+// Keys holds domain-separated HMAC keys derived from DISCLOUD_APP_SECRET.
 type Keys struct {
 	Session []byte
 	File    []byte
@@ -41,39 +41,35 @@ func hmacSHA256(key, msg []byte) []byte {
 	return m.Sum(nil)
 }
 
-// HashSessionToken returns a hex-encoded HMAC of the raw session token.
 func (k Keys) HashSessionToken(raw string) string {
 	return hex.EncodeToString(hmacSHA256(k.Session, []byte(raw)))
 }
 
-// HashFileToken returns a hex-encoded HMAC of the raw file access token.
 func (k Keys) HashFileToken(raw string) string {
 	return hex.EncodeToString(hmacSHA256(k.File, []byte(raw)))
 }
 
-// FileTokenMatch reports whether raw hashes to wantHash (constant-time).
+// FileTokenMatch compares hashed tokens in constant time.
 func (k Keys) FileTokenMatch(raw, wantHash string) bool {
 	got := k.HashFileToken(raw)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
 }
 
-// HashUploadToken returns a hex-encoded HMAC of the raw upload resume token.
 func (k Keys) HashUploadToken(raw string) string {
 	return hex.EncodeToString(hmacSHA256(k.Upload, []byte(raw)))
 }
 
-// UploadTokenMatch reports whether raw hashes to wantHash (constant-time).
+// UploadTokenMatch compares hashed tokens in constant time.
 func (k Keys) UploadTokenMatch(raw, wantHash string) bool {
 	got := k.HashUploadToken(raw)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
 }
 
-// HashAPIToken returns a hex-encoded HMAC of the raw personal access token.
 func (k Keys) HashAPIToken(raw string) string {
 	return hex.EncodeToString(hmacSHA256(k.API, []byte(raw)))
 }
 
-// APITokenMatch reports whether raw hashes to wantHash (constant-time).
+// APITokenMatch compares hashed tokens in constant time.
 func (k Keys) APITokenMatch(raw, wantHash string) bool {
 	got := k.HashAPIToken(raw)
 	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
@@ -129,7 +125,6 @@ func GenerateOpaqueToken() (string, error) {
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// NormalizeUsername lowercases and trims a username.
 func NormalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }

@@ -27,7 +27,6 @@ const (
 	IconUp     = "↑"
 )
 
-// ColorOn reports whether ANSI styles should be applied for f.
 func ColorOn(f *os.File) bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
@@ -45,22 +44,16 @@ func paint(enabled bool, code, s string) string {
 	return code + s + ansiReset
 }
 
-// Bold wraps s in ANSI bold when enabled.
 func Bold(enabled bool, s string) string { return paint(enabled, ansiBold, s) }
 
-// Dim wraps s in ANSI dim when enabled.
 func Dim(enabled bool, s string) string { return paint(enabled, ansiDim, s) }
 
-// Green wraps s in ANSI green when enabled.
 func Green(enabled bool, s string) string { return paint(enabled, ansiGreen, s) }
 
-// Red wraps s in ANSI red when enabled.
 func Red(enabled bool, s string) string { return paint(enabled, ansiRed, s) }
 
-// Yellow wraps s in ANSI yellow when enabled.
 func Yellow(enabled bool, s string) string { return paint(enabled, ansiYellow, s) }
 
-// Cyan wraps s in ANSI cyan when enabled.
 func Cyan(enabled bool, s string) string { return paint(enabled, ansiCyan, s) }
 
 func successMsg(msg string) string {
@@ -78,7 +71,6 @@ func errorMsg(msg string) string {
 	return Red(on, IconFail) + " " + msg
 }
 
-// VisibilityLabel returns a colored private/public label.
 func VisibilityLabel(enabled bool, v string) string {
 	switch v {
 	case "private":
@@ -90,12 +82,10 @@ func VisibilityLabel(enabled bool, v string) string {
 	}
 }
 
-// PrintSuccess writes a green success line to stdout.
 func PrintSuccess(format string, args ...any) {
 	fmt.Println(successMsg(fmt.Sprintf(format, args...)))
 }
 
-// PrintInfo writes a cyan info line to stdout.
 func PrintInfo(format string, args ...any) {
 	fmt.Println(infoMsg(fmt.Sprintf(format, args...)))
 }

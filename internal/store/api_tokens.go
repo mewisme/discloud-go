@@ -29,7 +29,6 @@ type APIToken struct {
 	CreatedAt  time.Time
 }
 
-// CreateAPIToken inserts a new PAT.
 func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, expires_at, created_at)
@@ -66,7 +65,6 @@ func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]APITo
 	})
 }
 
-// RevokeAPIToken sets revoked_at for a token owned by userID.
 func (s *Store) RevokeAPIToken(ctx context.Context, id, userID string, now time.Time) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE api_tokens SET revoked_at = $3
@@ -88,7 +86,6 @@ func (s *Store) RevokeAPITokensByUser(ctx context.Context, userID string, now ti
 	return err
 }
 
-// TouchAPITokenLastUsed updates last_used_at.
 func (s *Store) TouchAPITokenLastUsed(ctx context.Context, id string, now time.Time) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE api_tokens SET last_used_at = $2 WHERE id = $1`, id, now)

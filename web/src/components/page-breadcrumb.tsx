@@ -15,7 +15,6 @@ export type Crumb = {
   href?: string;
 };
 
-/** Home + trail. Last item is the current page (no link). */
 export function PageBreadcrumb({ items }: { items: Crumb[] }) {
   const crumbs: Crumb[] = [{ label: "Home", href: "/" }, ...items];
 

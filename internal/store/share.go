@@ -22,7 +22,6 @@ type FileSharePatch struct {
 	ShareMode         *string
 }
 
-// UpdateFileShare applies a partial share settings update.
 func (s *Store) UpdateFileShare(ctx context.Context, id string, p FileSharePatch) error {
 	f, err := s.GetFile(ctx, id)
 	if err != nil {

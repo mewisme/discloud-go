@@ -12,11 +12,11 @@ import (
 )
 
 // Concurrent first-user → admin under pg_advisory_xact_lock.
-// Requires DATABASE_URL and an empty users table (or DISCLOUD_TEST_WIPE_USERS=1).
+// Requires DISCLOUD_DATABASE_URL and an empty users table (or DISCLOUD_TEST_WIPE_USERS=1).
 func TestCreateUserConcurrentFirstAdmin(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := os.Getenv("DISCLOUD_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("DATABASE_URL not set")
+		t.Skip("DISCLOUD_DATABASE_URL not set")
 	}
 	ctx := context.Background()
 	st, err := New(ctx, dsn)

@@ -62,7 +62,6 @@ func (s *spinner) loop() {
 	}
 }
 
-// Stop clears the spinner line.
 func (s *spinner) Stop() {
 	if s == nil {
 		return
@@ -90,7 +89,6 @@ func WithSpinner(msg string, fn func() error) error {
 	return err
 }
 
-// WaitVal runs fn under a spinner and returns its value.
 func WaitVal[T any](msg string, fn func() (T, error)) (T, error) {
 	var v T
 	err := WithSpinner(msg, func() error {

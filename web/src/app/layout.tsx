@@ -41,7 +41,7 @@ export default async function RootLayout({
 }>) {
   await connection();
   const apiOrigin = (
-    process.env.API_URL || "http://localhost:8080"
+    process.env.DISCLOUD_API_URL || "http://localhost:8080"
   ).replace(/\/$/, "");
 
   return (

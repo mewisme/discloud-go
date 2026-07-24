@@ -6,16 +6,16 @@ services:
     image: ghcr.io/mewisme/discloud:${DISCLOUD_TAG:-latest}
     pull_policy: always
     environment:
-      PORT: "8080"
-      DATABASE_URL: postgres://discloud:${POSTGRES_PASSWORD:-discloud}@postgres:5432/discloud
-      VALKEY_URL: valkey://valkey:6379
-      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set in .env}
-      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID:?set in .env}
-      API_URL: ${API_URL:-http://localhost:8080}
+      DISCLOUD_PORT: "8080"
+      DISCLOUD_DATABASE_URL: postgres://discloud:${POSTGRES_PASSWORD:-discloud}@postgres:5432/discloud
+      DISCLOUD_VALKEY_URL: valkey://valkey:6379
+      DISCLOUD_BOT_TOKEN: ${DISCLOUD_BOT_TOKEN:?set in .env}
+      DISCLOUD_CHANNEL_ID: ${DISCLOUD_CHANNEL_ID:?set in .env}
+      DISCLOUD_API_URL: ${DISCLOUD_API_URL:-http://localhost:8080}
       # Optional — if unset, API auto-generates /data/.app.secret
-      APP_SECRET: ${APP_SECRET:-}
-      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
-      CAPTCHA_SECRET: ${CAPTCHA_SECRET:-}
+      DISCLOUD_APP_SECRET: ${DISCLOUD_APP_SECRET:-}
+      DISCLOUD_CORS: ${DISCLOUD_CORS:-http://localhost:3000}
+      DISCLOUD_CAPTCHA_SECRET: ${DISCLOUD_CAPTCHA_SECRET:-}
     ports:
       - "8080:8080"
     volumes:
@@ -35,11 +35,11 @@ services:
     pull_policy: always
     environment:
       # Browser-facing API origin (not the Docker-internal hostname).
-      API_URL: ${API_URL:-http://localhost:8080}
+      DISCLOUD_API_URL: ${DISCLOUD_API_URL:-http://localhost:8080}
       # Server-side proxy for /install.sh|/install.ps1 (compose network).
-      API_UPSTREAM: http://api:8080
+      DISCLOUD_API_UPSTREAM: http://api:8080
       # Turnstile site key for /api/captcha (runtime; no rebuild needed).
-      CAPTCHA_KEY: ${CAPTCHA_KEY:-}
+      DISCLOUD_CAPTCHA_KEY: ${DISCLOUD_CAPTCHA_KEY:-}
       NODE_OPTIONS: --max-old-space-size=192
     ports:
       - "3000:3000"

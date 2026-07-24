@@ -37,7 +37,8 @@ type Config struct {
 	APIURL string
 	// AppSecret is the root secret for HMAC key derivation (sessions, file tokens).
 	AppSecret string
-	// WebOrigin is the exact browser origin allowed for CORS credentials (e.g. http://localhost:3000).
+	// WebOrigin is the exact browser origin allowed for CORS credentials
+	// (from DISCLOUD_CORS, e.g. http://localhost:3000).
 	WebOrigin string
 	// CookieSecure is true when WebOrigin uses HTTPS.
 	CookieSecure bool
@@ -57,29 +58,29 @@ type Config struct {
 
 func Load() (Config, error) {
 	c := Config{
-		Port:                    getenv("PORT", "8080"),
-		DatabaseURL:             os.Getenv("DATABASE_URL"),
-		ValkeyURL:               os.Getenv("VALKEY_URL"),
-		DiscordBotToken:         strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
-		DiscordChannelID:        os.Getenv("DISCORD_CHANNEL_ID"),
-		APIURL:                  strings.TrimSpace(os.Getenv("API_URL")),
-		AppSecret:               os.Getenv("APP_SECRET"),
-		WebOrigin:               strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
-		TrustProxy:              envTruthy("TRUST_PROXY"),
-		RateLimitUploadPerMin:   envInt("RATE_LIMIT_UPLOAD_PER_MIN", 60),
-		RateLimitDownloadPerMin: envInt("RATE_LIMIT_DOWNLOAD_PER_MIN", 120),
-		MaxUserBytes:            envBytes("MAX_USER_BYTES", 0),
-		MaxAnonUploadsPerDay:    envInt("MAX_ANON_UPLOADS_PER_DAY", 50),
-		MaxAnonBytesPerDay:      envBytes("MAX_ANON_BYTES_PER_DAY", 2<<30),
-		MaxRawUploadBytes:       envBytes("MAX_RAW_UPLOAD_BYTES", 0),
-		CaptchaSecret:           strings.TrimSpace(os.Getenv("CAPTCHA_SECRET")),
+		Port:                    getenv("DISCLOUD_PORT", "8080"),
+		DatabaseURL:             os.Getenv("DISCLOUD_DATABASE_URL"),
+		ValkeyURL:               os.Getenv("DISCLOUD_VALKEY_URL"),
+		DiscordBotToken:         strings.TrimSpace(os.Getenv("DISCLOUD_BOT_TOKEN")),
+		DiscordChannelID:        os.Getenv("DISCLOUD_CHANNEL_ID"),
+		APIURL:                  strings.TrimSpace(os.Getenv("DISCLOUD_API_URL")),
+		AppSecret:               os.Getenv("DISCLOUD_APP_SECRET"),
+		WebOrigin:               strings.TrimSpace(os.Getenv("DISCLOUD_CORS")),
+		TrustProxy:              envTruthy("DISCLOUD_TRUST_PROXY"),
+		RateLimitUploadPerMin:   envInt("DISCLOUD_RL_UPLOAD", 60),
+		RateLimitDownloadPerMin: envInt("DISCLOUD_RL_DOWNLOAD", 120),
+		MaxUserBytes:            envBytes("DISCLOUD_MAX_USER_BYTES", 0),
+		MaxAnonUploadsPerDay:    envInt("DISCLOUD_MAX_ANON_UPLOADS", 50),
+		MaxAnonBytesPerDay:      envBytes("DISCLOUD_MAX_ANON_BYTES", 2<<30),
+		MaxRawUploadBytes:       envBytes("DISCLOUD_MAX_RAW_UPLOAD", 0),
+		CaptchaSecret:           strings.TrimSpace(os.Getenv("DISCLOUD_CAPTCHA_SECRET")),
 	}
 	for name, v := range map[string]string{
-		"DATABASE_URL":       c.DatabaseURL,
-		"VALKEY_URL":         c.ValkeyURL,
-		"DISCORD_BOT_TOKEN":  c.DiscordBotToken,
-		"DISCORD_CHANNEL_ID": c.DiscordChannelID,
-		"WEB_ORIGIN":         c.WebOrigin,
+		"DISCLOUD_DATABASE_URL": c.DatabaseURL,
+		"DISCLOUD_VALKEY_URL":   c.ValkeyURL,
+		"DISCLOUD_BOT_TOKEN":    c.DiscordBotToken,
+		"DISCLOUD_CHANNEL_ID":   c.DiscordChannelID,
+		"DISCLOUD_CORS":         c.WebOrigin,
 	} {
 		if v == "" {
 			return Config{}, fmt.Errorf("missing required environment variable %s", name)
@@ -93,10 +94,10 @@ func Load() (Config, error) {
 		c.AppSecret = s
 	}
 	if len(c.AppSecret) < 32 {
-		return Config{}, fmt.Errorf("APP_SECRET must be at least 32 characters")
+		return Config{}, fmt.Errorf("DISCLOUD_APP_SECRET must be at least 32 characters")
 	}
 	if !hasToken(c.DiscordBotToken) {
-		return Config{}, fmt.Errorf("DISCORD_BOT_TOKEN has no usable tokens")
+		return Config{}, fmt.Errorf("DISCLOUD_BOT_TOKEN has no usable tokens")
 	}
 	origin, secure, err := parseWebOrigin(c.WebOrigin)
 	if err != nil {
@@ -110,19 +111,19 @@ func Load() (Config, error) {
 func parseWebOrigin(raw string) (origin string, secure bool, err error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", false, fmt.Errorf("WEB_ORIGIN: %w", err)
+		return "", false, fmt.Errorf("DISCLOUD_CORS: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", false, fmt.Errorf("WEB_ORIGIN must use http or https scheme")
+		return "", false, fmt.Errorf("DISCLOUD_CORS must use http or https scheme")
 	}
 	if u.Host == "" {
-		return "", false, fmt.Errorf("WEB_ORIGIN must include a host")
+		return "", false, fmt.Errorf("DISCLOUD_CORS must include a host")
 	}
 	if u.Path != "" && u.Path != "/" {
-		return "", false, fmt.Errorf("WEB_ORIGIN must not include a path")
+		return "", false, fmt.Errorf("DISCLOUD_CORS must not include a path")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return "", false, fmt.Errorf("WEB_ORIGIN must not include query or fragment")
+		return "", false, fmt.Errorf("DISCLOUD_CORS must not include query or fragment")
 	}
 	return u.Scheme + "://" + u.Host, u.Scheme == "https", nil
 }

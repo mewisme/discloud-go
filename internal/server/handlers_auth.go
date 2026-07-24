@@ -704,7 +704,7 @@ func (s *Server) RunCleanup(ctx context.Context) {
 			s.log.Info("upload sessions expired", "count", un)
 		}
 	}
-	// Shortly after start.
+	// First pass shortly after start so expired rows are not held until the first ticker.
 	select {
 	case <-ctx.Done():
 		return

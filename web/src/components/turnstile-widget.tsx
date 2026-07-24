@@ -34,7 +34,7 @@ type Props = {
 };
 
 /**
- * Cloudflare Turnstile widget. Fetches site key from `/api/captcha` (CAPTCHA_KEY).
+ * Cloudflare Turnstile widget. Fetches site key from `/api/captcha` (DISCLOUD_CAPTCHA_KEY).
  * Tokens are single-use; upload code calls takeCaptchaToken() which resets after consume.
  */
 export function TurnstileWidget({ active = true }: Props) {

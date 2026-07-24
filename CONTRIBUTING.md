@@ -6,7 +6,7 @@ Thanks for helping with DisCloud.
 
 ```bash
 cp .env.example .env
-# set DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID
+# set DISCLOUD_BOT_TOKEN and DISCLOUD_CHANNEL_ID
 
 docker compose up --build -d   # full stack
 # or locally:

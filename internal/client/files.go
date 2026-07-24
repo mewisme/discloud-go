@@ -8,7 +8,6 @@ import (
 	"net/url"
 )
 
-// ListFiles returns owned files (auth required).
 func (c *Client) ListFiles(limit, offset int) (map[string]any, error) {
 	q := url.Values{}
 	if limit > 0 {
@@ -37,7 +36,6 @@ func (c *Client) GetFile(id, token string) (map[string]any, error) {
 	return out, err
 }
 
-// Inspect returns file analytics.
 func (c *Client) Inspect(id, token string) (map[string]any, error) {
 	path := "/api/files/" + url.PathEscape(id) + "/inspect"
 	if token != "" {
@@ -56,14 +54,12 @@ func (c *Client) SetVisibility(id, visibility string) (map[string]any, error) {
 	return out, err
 }
 
-// RotateToken issues a new private-file access token.
 func (c *Client) RotateToken(id string) (map[string]any, error) {
 	var out map[string]any
 	err := c.DoJSON(http.MethodPost, "/api/files/"+url.PathEscape(id)+"/access-token/rotate", nil, &out)
 	return out, err
 }
 
-// DeleteFile removes file metadata (204).
 func (c *Client) DeleteFile(id string) error {
 	return c.DoJSON(http.MethodDelete, "/api/files/"+url.PathEscape(id), nil, nil)
 }
@@ -76,7 +72,6 @@ type FileShareUpdate struct {
 	ShareMode    *string `json:"shareMode,omitempty"`
 }
 
-// UpdateShare patches share settings (password, expiry, max downloads, mode).
 func (c *Client) UpdateShare(id string, patch FileShareUpdate) (map[string]any, error) {
 	var out map[string]any
 	err := c.DoJSON(http.MethodPatch, "/api/files/"+url.PathEscape(id)+"/share", patch, &out)

@@ -15,7 +15,7 @@ func (s *Server) captchaEnabled() bool {
 	return s.captchaSecret != ""
 }
 
-// requireCaptcha verifies a Turnstile token when CAPTCHA_SECRET is set (anon only).
+// requireCaptcha verifies a Turnstile token when DISCLOUD_CAPTCHA_SECRET is set (anon only).
 func (s *Server) requireCaptcha(w http.ResponseWriter, r *http.Request, token string) bool {
 	if !s.captchaEnabled() {
 		return true

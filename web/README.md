@@ -23,28 +23,28 @@ From the **repo root** (API must be reachable):
 ```bash
 # terminal 1 — full stack, or at least the API on :8080
 docker compose up -d
-# or: make run  (needs Discord + DATABASE_URL + VALKEY_URL + WEB_ORIGIN)
+# or: make run  (needs Discord + DISCLOUD_DATABASE_URL + DISCLOUD_VALKEY_URL + DISCLOUD_CORS)
 
 # terminal 2 — this app
 cd web
 pnpm install
-echo 'API_URL=http://localhost:8080' > .env.local
+echo 'DISCLOUD_API_URL=http://localhost:8080' > .env.local
 pnpm dev
 ```
 
-Open http://localhost:3000. Server `WEB_ORIGIN` must be exactly `http://localhost:3000` (CORS + cookies).
+Open http://localhost:3000. Server `DISCLOUD_CORS` must be exactly `http://localhost:3000` (CORS + cookies).
 
 ## Configuration
 
 | Variable | Where | Default | Role |
 | --- | --- | --- | --- |
-| `API_URL` | Server (layout) | `http://localhost:8080` | Browser-facing API origin; injected as `self.__DISCLOUD_API__` |
-| `API_UPSTREAM` | Server (install routes) | `API_URL`, then localhost | Docker-internal API for `/install.sh` / `/install.ps1` |
+| `DISCLOUD_API_URL` | Server (layout) | `http://localhost:8080` | Browser-facing API origin; injected as `self.__DISCLOUD_API__` |
+| `DISCLOUD_API_UPSTREAM` | Server (install routes) | `DISCLOUD_API_URL`, then localhost | Docker-internal API for `/install.sh` / `/install.ps1` |
 | `PORT` / `HOSTNAME` | Docker image | `3000` / `0.0.0.0` | Standalone Node server |
 
-Compose sets `API_URL` (public) and `API_UPSTREAM=http://api:8080`. Locally, only `API_URL` in `web/.env.local` is usually enough.
+Compose sets `DISCLOUD_API_URL` (public) and `DISCLOUD_API_UPSTREAM=http://api:8080`. Locally, only `DISCLOUD_API_URL` in `web/.env.local` is usually enough.
 
-The browser talks to `API_URL` with `credentials: "include"`. Cross-origin setups need the API `WEB_ORIGIN` to match this UI’s origin.
+The browser talks to `DISCLOUD_API_URL` with `credentials: "include"`. Cross-origin setups need the API `DISCLOUD_CORS` to match this UI’s origin.
 
 ## Routes
 
@@ -93,7 +93,7 @@ docker compose up -d web
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d web
 ```
 
-Production: set `API_URL` to the **public** API origin the browser can call. Keep `API_UPSTREAM` on the compose network hostname when install scripts are served through the UI.
+Production: set `DISCLOUD_API_URL` to the **public** API origin the browser can call. Keep `DISCLOUD_API_UPSTREAM` on the compose network hostname when install scripts are served through the UI.
 
 ## Development notes
 

@@ -1,8 +1,8 @@
 /** Upstream API origin for server-side proxy (install scripts, etc.). */
 export function apiUpstream(): string {
   return (
-    process.env.API_UPSTREAM ||
-    process.env.API_URL ||
+    process.env.DISCLOUD_API_UPSTREAM ||
+    process.env.DISCLOUD_API_URL ||
     "http://localhost:8080"
   ).replace(/\/$/, "");
 }

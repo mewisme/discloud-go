@@ -22,10 +22,8 @@ const (
 	chunkAttempts    = 3
 )
 
-// ProgressFunc reports upload progress (sent, total bytes).
 type ProgressFunc func(sent, total int64)
 
-// UploadChunkedOptions configures resumable upload.
 type UploadChunkedOptions struct {
 	FileName string
 	Workers  int // 0 → defaultWorkers
@@ -314,7 +312,6 @@ func (c *Client) AbortUpload(path string) error {
 	return nil
 }
 
-// HashBytes returns the SHA-256 hex of data.
 func HashBytes(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

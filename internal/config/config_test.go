@@ -9,11 +9,11 @@ import (
 
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("DATABASE_URL", "postgres://x")
-	t.Setenv("VALKEY_URL", "valkey://x")
-	t.Setenv("DISCORD_BOT_TOKEN", "tok")
-	t.Setenv("DISCORD_CHANNEL_ID", "1")
-	t.Setenv("WEB_ORIGIN", "http://localhost:3000")
+	t.Setenv("DISCLOUD_DATABASE_URL", "postgres://x")
+	t.Setenv("DISCLOUD_VALKEY_URL", "valkey://x")
+	t.Setenv("DISCLOUD_BOT_TOKEN", "tok")
+	t.Setenv("DISCLOUD_CHANNEL_ID", "1")
+	t.Setenv("DISCLOUD_CORS", "http://localhost:3000")
 }
 
 func chdirTemp(t *testing.T) string {
@@ -33,17 +33,17 @@ func chdirTemp(t *testing.T) string {
 func TestLoadRequiresWebOrigin(t *testing.T) {
 	chdirTemp(t)
 	setRequiredEnv(t)
-	os.Unsetenv("APP_SECRET")
-	os.Unsetenv("WEB_ORIGIN")
+	os.Unsetenv("DISCLOUD_APP_SECRET")
+	os.Unsetenv("DISCLOUD_CORS")
 	if _, err := Load(); err == nil {
-		t.Fatal("expected error without WEB_ORIGIN")
+		t.Fatal("expected error without DISCLOUD_CORS")
 	}
-	t.Setenv("WEB_ORIGIN", "http://localhost:3000")
-	t.Setenv("APP_SECRET", "short")
+	t.Setenv("DISCLOUD_CORS", "http://localhost:3000")
+	t.Setenv("DISCLOUD_APP_SECRET", "short")
 	if _, err := Load(); err == nil {
-		t.Fatal("expected error for short APP_SECRET")
+		t.Fatal("expected error for short DISCLOUD_APP_SECRET")
 	}
-	t.Setenv("APP_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("DISCLOUD_APP_SECRET", "0123456789abcdef0123456789abcdef")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestLoadRequiresWebOrigin(t *testing.T) {
 	if cfg.WebOrigin != "http://localhost:3000" || cfg.CookieSecure {
 		t.Fatalf("got %+v", cfg)
 	}
-	t.Setenv("WEB_ORIGIN", "https://app.example.com")
+	t.Setenv("DISCLOUD_CORS", "https://app.example.com")
 	cfg, err = Load()
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestLoadAppSecretEnvWinsOverFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	envSecret := "env-secret-at-least-32-characters!!"
-	t.Setenv("APP_SECRET", envSecret)
+	t.Setenv("DISCLOUD_APP_SECRET", envSecret)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestLoadAppSecretEnvWinsOverFile(t *testing.T) {
 func TestLoadAppSecretCreatesFileWhenEnvMissing(t *testing.T) {
 	chdirTemp(t)
 	setRequiredEnv(t)
-	os.Unsetenv("APP_SECRET")
+	os.Unsetenv("DISCLOUD_APP_SECRET")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)

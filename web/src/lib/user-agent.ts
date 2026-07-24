@@ -3,7 +3,6 @@ export type ParsedUserAgent = {
   os: string;
 };
 
-/** Tiny UA → browser/OS labels. No dependency. */
 export function parseUserAgent(ua: string): ParsedUserAgent {
   const s = ua.trim();
   if (!s) return { browser: "Unknown", os: "Unknown" };

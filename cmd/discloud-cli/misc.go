@@ -171,7 +171,7 @@ func newConfigSetCmd() *cobra.Command {
 		}),
 	}
 	cmd.Flags().StringVar(&base, "base", "", "API origin to save")
-	cmd.Flags().StringVar(&origin, "origin", "", "WEB_ORIGIN to save")
+	cmd.Flags().StringVar(&origin, "origin", "", "DISCLOUD_CORS origin to save")
 	cmd.Flags().BoolVar(&setToken, "token", false, "Prompt for personal access token (value not passed on the CLI)")
 	cmd.Flags().BoolVar(&clearToken, "clear-token", false, "Remove stored token (prefer: config unset token)")
 	return cmd

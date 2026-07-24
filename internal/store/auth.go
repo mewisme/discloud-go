@@ -61,7 +61,6 @@ type Session struct {
 	LastSeenAt time.Time
 }
 
-// OwnerStats is aggregate file metadata for an account dashboard.
 type OwnerStats struct {
 	FileCount         int64
 	TotalBytes        int64
@@ -201,7 +200,6 @@ func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string, now
 	return sess, nil
 }
 
-// TouchSession updates last_seen_at, ip, and user_agent for an active session.
 func (s *Store) TouchSession(ctx context.Context, tokenHash, ip, userAgent string, now time.Time) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE sessions SET last_seen_at = $2, ip = $3, user_agent = $4
@@ -257,7 +255,6 @@ func (s *Store) UpdateDefaultVisibility(ctx context.Context, userID, visibility 
 	return nil
 }
 
-// OwnerFileStats returns aggregate file stats for an owner.
 func (s *Store) OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (OwnerStats, error) {
 	soon := now.Add(soonWithin)
 	var st OwnerStats
