@@ -82,7 +82,7 @@ export default async function RootLayout({
                     Files
                   </Link>
                   <Link href="/docs" className="transition-colors hover:text-foreground">
-                    API
+                    API Docs
                   </Link>
                 </nav>
                 <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
@@ -116,7 +116,7 @@ export default async function RootLayout({
                   Files
                 </Link>
                 <Link href="/docs" className="transition-colors hover:text-foreground">
-                  API
+                  API Docs
                 </Link>
               </nav>
             </header>

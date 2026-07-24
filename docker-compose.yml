@@ -16,8 +16,6 @@ services:
       APP_SECRET: ${APP_SECRET:-}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       CAPTCHA_SECRET: ${CAPTCHA_SECRET:-}
-      GOMEMLIMIT: 96MiB
-      GOGC: "50"
     ports:
       - "8080:8080"
     volumes:
@@ -29,8 +27,6 @@ services:
       valkey:
         condition: service_healthy
     networks: [discloud]
-    mem_limit: 128m
-    mem_reservation: 32m
     restart: unless-stopped
 
   web:
@@ -61,27 +57,6 @@ services:
       POSTGRES_USER: discloud
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-discloud}
       POSTGRES_DB: discloud
-    # Metadata store only — keep the shared buffer pool and connection count tiny.
-    command:
-      - postgres
-      - -c
-      - shared_buffers=32MB
-      - -c
-      - effective_cache_size=64MB
-      - -c
-      - work_mem=1MB
-      - -c
-      - maintenance_work_mem=16MB
-      - -c
-      - wal_buffers=512kB
-      - -c
-      - max_connections=20
-      - -c
-      - min_wal_size=32MB
-      - -c
-      - max_wal_size=64MB
-      - -c
-      - checkpoint_completion_target=0.9
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -90,20 +65,14 @@ services:
       timeout: 3s
       retries: 10
     networks: [discloud]
-    mem_limit: 128m
-    mem_reservation: 48m
     restart: unless-stopped
 
   valkey:
     container_name: discloud-valkey
     image: valkey/valkey:8-alpine
-    # CDN URL cache is reconstructable — skip disk persistence to keep RSS low.
+    # CDN URL cache is reconstructable — skip disk persistence.
     command:
       - valkey-server
-      - --maxmemory
-      - 24mb
-      - --maxmemory-policy
-      - allkeys-lru
       - --save
       - ""
       - --appendonly
@@ -116,8 +85,6 @@ services:
       timeout: 3s
       retries: 10
     networks: [discloud]
-    mem_limit: 32m
-    mem_reservation: 8m
     restart: unless-stopped
 
 networks:
