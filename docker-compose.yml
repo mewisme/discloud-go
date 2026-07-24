@@ -26,6 +26,12 @@ services:
         condition: service_healthy
       valkey:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/discloud", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks: [discloud]
     # Bad/missing env: binary exits 0 → no restart. Other crashes: at most 3 retries.
     restart: on-failure:3
@@ -45,7 +51,14 @@ services:
     ports:
       - 3000:3000
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
     networks: [discloud]
     mem_limit: 256m
     mem_reservation: 64m
