@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,79 @@ func TestLoadRequiresWebOrigin(t *testing.T) {
 	}
 	if !cfg.CookieSecure {
 		t.Fatal("https origin should set CookieSecure")
+	}
+}
+
+func TestLoadRejectsMissingRequired(t *testing.T) {
+	chdirTemp(t)
+	for _, k := range []string{
+		"DISCLOUD_DATABASE_URL", "DISCLOUD_VALKEY_URL", "DISCLOUD_BOT_TOKEN",
+		"DISCLOUD_CHANNEL_ID", "DISCLOUD_CORS", "DISCLOUD_APP_SECRET",
+	} {
+		os.Unsetenv(k)
+	}
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for missing required env")
+	}
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"DISCLOUD_DATABASE_URL", "DISCLOUD_VALKEY_URL", "DISCLOUD_BOT_TOKEN",
+		"DISCLOUD_CHANNEL_ID", "DISCLOUD_CORS",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %s", msg, want)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidEnv(t *testing.T) {
+	chdirTemp(t)
+	setRequiredEnv(t)
+	t.Setenv("DISCLOUD_APP_SECRET", "0123456789abcdef0123456789abcdef")
+
+	t.Setenv("DISCLOUD_PORT", "notaport")
+	if _, err := Load(); err == nil || !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for port, got %v", err)
+	}
+	t.Setenv("DISCLOUD_PORT", "8080")
+
+	t.Setenv("DISCLOUD_DATABASE_URL", "mysql://localhost/db")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid database URL error")
+	}
+	t.Setenv("DISCLOUD_DATABASE_URL", "postgres://x")
+
+	t.Setenv("DISCLOUD_VALKEY_URL", "http://localhost:6379")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid valkey URL error")
+	}
+	t.Setenv("DISCLOUD_VALKEY_URL", "valkey://x")
+
+	t.Setenv("DISCLOUD_RL_UPLOAD", "nope")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid RL_UPLOAD error")
+	}
+	t.Setenv("DISCLOUD_RL_UPLOAD", "-1")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected negative RL_UPLOAD error")
+	}
+	os.Unsetenv("DISCLOUD_RL_UPLOAD")
+
+	t.Setenv("DISCLOUD_API_URL", "http://api.example.com/path")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected API_URL with path to fail")
+	}
+	t.Setenv("DISCLOUD_API_URL", "http://api.example.com")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIURL != "http://api.example.com" {
+		t.Fatalf("APIURL=%q", cfg.APIURL)
 	}
 }
 

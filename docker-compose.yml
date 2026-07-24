@@ -9,8 +9,8 @@ services:
       DISCLOUD_PORT: "8080"
       DISCLOUD_DATABASE_URL: postgres://discloud:${POSTGRES_PASSWORD:-discloud}@postgres:5432/discloud
       DISCLOUD_VALKEY_URL: valkey://valkey:6379
-      DISCLOUD_BOT_TOKEN: ${DISCLOUD_BOT_TOKEN:?set in .env}
-      DISCLOUD_CHANNEL_ID: ${DISCLOUD_CHANNEL_ID:?set in .env}
+      DISCLOUD_BOT_TOKEN: ${DISCLOUD_BOT_TOKEN:-}
+      DISCLOUD_CHANNEL_ID: ${DISCLOUD_CHANNEL_ID:-}
       DISCLOUD_API_URL: ${DISCLOUD_API_URL:-http://localhost:8080}
       # Optional — if unset, API auto-generates /data/.app.secret
       DISCLOUD_APP_SECRET: ${DISCLOUD_APP_SECRET:-}
@@ -27,7 +27,8 @@ services:
       valkey:
         condition: service_healthy
     networks: [discloud]
-    restart: unless-stopped
+    # Bad/missing env: binary exits 0 → no restart. Other crashes: at most 3 retries.
+    restart: on-failure:3
 
   web:
     container_name: discloud-web

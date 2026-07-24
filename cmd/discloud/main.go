@@ -27,6 +27,10 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
 		log.Error("fatal", "error", err)
+		// Exit 0 on bad/missing env so Compose restart:on-failure does not crash-loop.
+		if errors.Is(err, config.ErrInvalid) {
+			os.Exit(0)
+		}
 		os.Exit(1)
 	}
 }
