@@ -1,11 +1,11 @@
 package client
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -30,34 +30,19 @@ type UploadChunkedOptions struct {
 	FileName string
 	Workers  int // 0 → defaultWorkers
 	Progress ProgressFunc
-}
-
-// UploadRaw POSTs the whole file to /api/upload (non-chunked).
-func (c *Client) UploadRaw(path, fileName string) (map[string]any, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	if fileName == "" {
-		fileName = filepath.Base(path)
-	}
-	q := url.Values{"fileName": {fileName}}
-	res, err := c.Do(http.MethodPost, "/api/upload?"+q.Encode(), f, "application/octet-stream")
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	var out map[string]any
-	if err := decodeResponse(res, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	Context  context.Context // optional; cancelled mid-upload stops between chunks
 }
 
 // UploadChunked splits the file, skips known chunks, uploads in parallel, then completes.
 // Uses server upload sessions when advertised by GET /api/info; otherwise legacy complete.
 func (c *Client) UploadChunked(path string, opt UploadChunkedOptions) (map[string]any, error) {
+	ctx := opt.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -182,7 +167,14 @@ func (c *Client) UploadChunked(path string, opt UploadChunkedOptions) (map[strin
 	for w := 0; w < workers; w++ {
 		g.Go(func() error {
 			buf := make([]byte, chunkSize)
-			for j := range jobs {
+			for {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				j, ok := <-jobs
+				if !ok {
+					return nil
+				}
 				off := int64(j.idx) * chunkSize
 				n := chunkSize
 				if rem := st.Size() - off; rem < n {
@@ -192,12 +184,18 @@ func (c *Client) UploadChunked(path string, opt UploadChunkedOptions) (map[strin
 				if _, err := f.ReadAt(chunk, off); err != nil {
 					return fmt.Errorf("read chunk %d: %w", j.idx, err)
 				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				hash, err := c.uploadChunkWithRetry(chunk)
 				if err != nil {
 					return fmt.Errorf("chunk %d: %w", j.idx, err)
 				}
 				hashes[j.idx] = hash
 				if useSession {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					if err := c.DoJSONUploadToken(http.MethodPut,
 						fmt.Sprintf("/api/uploads/%s/parts/%d", uploadID, j.idx),
 						map[string]string{"hash": hash}, nil, resumeToken); err != nil {
@@ -214,10 +212,12 @@ func (c *Client) UploadChunked(path string, opt UploadChunkedOptions) (map[strin
 				sent.Add(n)
 				report()
 			}
-			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 

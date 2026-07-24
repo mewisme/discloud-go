@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"charm.land/huh/v2"
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
@@ -42,11 +45,11 @@ func newAuthLoginCmd() *cobra.Command {
 			if len(args) >= 2 {
 				passArg = args[1]
 			}
-			username, err := ui.ResolveUsername(userArg)
+			username, err := promptUsername(userArg)
 			if err != nil {
 				return err
 			}
-			password, err := ui.ResolvePassword(passArg, passwordStdin)
+			password, err := resolvePassword(passArg, passwordStdin)
 			if err != nil {
 				return err
 			}
@@ -116,11 +119,11 @@ func newAuthSignupCmd() *cobra.Command {
 			if len(args) >= 2 {
 				passArg = args[1]
 			}
-			username, err := ui.ResolveUsername(userArg)
+			username, err := promptUsername(userArg)
 			if err != nil {
 				return err
 			}
-			password, err := ui.ResolvePassword(passArg, passwordStdin)
+			password, err := resolvePassword(passArg, passwordStdin)
 			if err != nil {
 				return err
 			}
@@ -254,7 +257,7 @@ func newAuthPasswordCmd() *cobra.Command {
 			if len(args) >= 2 {
 				newArg = args[1]
 			}
-			current, err := ui.ResolvePassword(curArg, false)
+			current, err := resolvePassword(curArg, false)
 			if err != nil {
 				return fmt.Errorf("current password: %w", err)
 			}
@@ -262,15 +265,9 @@ func newAuthPasswordCmd() *cobra.Command {
 			if newArg != "" {
 				next = newArg
 			} else {
-				if !ui.IsTTY(os.Stdin) {
-					return fmt.Errorf("new password required")
-				}
-				next, err = ui.ReadPasswordPrompt("New password: ")
+				next, err = promptPassword("New password")
 				if err != nil {
 					return err
-				}
-				if next == "" {
-					return fmt.Errorf("empty password")
 				}
 			}
 			c, err := apiClient()
@@ -434,15 +431,10 @@ func newAuthTokenInfoCmd() *cobra.Command {
 						return fmt.Errorf("--prompt is interactive; omit --json")
 					}
 					var err error
-					tok, err = ui.ReadPasswordPrompt("Token: ")
+					tok, err = promptPassword("Token")
 					if err != nil {
 						return err
 					}
-					tok = strings.TrimSpace(tok)
-					if tok == "" {
-						return fmt.Errorf("token is required")
-					}
-					ui.ClearLinesUp(os.Stderr, 1)
 				}
 			}
 			if !strings.HasPrefix(tok, "dc_") {
@@ -526,11 +518,8 @@ func newAuthTokenRevokeCmd() *cobra.Command {
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			if !yes {
-				if !ui.IsTTY(os.Stdin) {
-					return fmt.Errorf("refusing revoke without -y (non-interactive)")
-				}
-				if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Revoke token %s?", id)) {
-					return fmt.Errorf("aborted")
+				if err := promptConfirm(fmt.Sprintf("Revoke token %s?", id)); err != nil {
+					return err
 				}
 			}
 			c, err := apiClient()
@@ -563,4 +552,110 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func promptUsername(arg string) (string, error) {
+	return promptArg(arg, "Username")
+}
+
+func promptArg(arg, title string) (string, error) {
+	if v := strings.TrimSpace(arg); v != "" {
+		return v, nil
+	}
+	if flagJSON {
+		return "", fmt.Errorf("%s is required with --json", title)
+	}
+	if !ui.IsTTY(os.Stdin) {
+		return "", fmt.Errorf("%s is required", title)
+	}
+	var v string
+	err := huh.NewInput().
+		Title(title).
+		Value(&v).
+		Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("%s is required", title)
+			}
+			return nil
+		}).
+		Run()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(v), nil
+}
+
+// resolvePassword picks password from --password-stdin, deprecated positional, or TTY prompt.
+func resolvePassword(positional string, passwordStdin bool) (string, error) {
+	if positional != "" && passwordStdin {
+		return "", fmt.Errorf("conflicting password inputs: positional password and --password-stdin")
+	}
+	if passwordStdin {
+		return readPasswordStdin(os.Stdin)
+	}
+	if positional != "" {
+		return positional, nil
+	}
+	return promptPassword("Password")
+}
+
+func promptPassword(title string) (string, error) {
+	if flagJSON {
+		return "", fmt.Errorf("%s required with --json", title)
+	}
+	if !ui.IsTTY(os.Stdin) {
+		return "", fmt.Errorf("password required: use --password-stdin or run in a TTY")
+	}
+	var pw string
+	err := huh.NewInput().
+		Title(title).
+		EchoMode(huh.EchoModePassword).
+		Value(&pw).
+		Validate(func(s string) error {
+			if s == "" {
+				return errors.New("Password is required")
+			}
+			return nil
+		}).
+		Run()
+	if err != nil {
+		return "", err
+	}
+	return pw, nil
+}
+
+func promptConfirm(title string) error {
+	if flagJSON || !ui.IsTTY(os.Stdin) {
+		return fmt.Errorf("refusing without -y (non-interactive)")
+	}
+	var ok bool
+	if err := huh.NewConfirm().
+		Title(title).
+		Affirmative("Yes").
+		Negative("No").
+		Value(&ok).
+		Run(); err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("aborted")
+	}
+	return nil
+}
+
+func readPasswordStdin(r io.Reader) (string, error) {
+	br := bufio.NewReader(r)
+	line, err := br.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	if len(line) == 0 && err == io.EOF {
+		return "", fmt.Errorf("empty password from stdin")
+	}
+	line = strings.TrimSuffix(line, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	if line == "" {
+		return "", fmt.Errorf("empty password from stdin")
+	}
+	return line, nil
 }

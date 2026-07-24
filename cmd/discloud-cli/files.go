@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/huh/v2"
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/mewisme/discloud-go/internal/integrity"
@@ -182,61 +183,51 @@ func newFilesVisibilityCmd() *cobra.Command {
 				return err
 			}
 			var id, vis string
-			clearLines := 0
-			visClear := 0
 			switch len(args) {
 			case 0:
 				var cur string
-				id, cur, clearLines, err = pickFileStayVisibility(c)
+				id, cur, err = pickFileVisibility(c)
 				if err != nil {
 					return err
 				}
-				vis, visClear, err = resolveVisibility("", cur)
+				vis, err = resolveVisibility("", cur)
 				if err != nil {
 					return err
 				}
 			case 1:
 				if args[0] == "public" || args[0] == "private" {
 					vis = args[0]
-					id, _, clearLines, err = pickFileStayVisibility(c)
+					id, _, err = pickFileVisibility(c)
 				} else {
 					id = args[0]
 					cur, err := currentVisibility(c, id)
 					if err != nil {
 						return err
 					}
-					vis, visClear, err = resolveVisibility("", cur)
+					vis, err = resolveVisibility("", cur)
 				}
 				if err != nil {
 					return err
 				}
 			default:
 				id = args[0]
-				vis, visClear, err = resolveVisibility(args[1], "")
+				vis, err = resolveVisibility(args[1], "")
 				if err != nil {
 					return err
 				}
 			}
 
-			confirmExtra := 0
 			if vis == "public" && !yes {
 				cur, err := currentVisibility(c, id)
 				if err != nil {
 					return err
 				}
 				if cur == "private" {
-					if !ui.IsTTY(os.Stdin) || flagJSON {
-						return fmt.Errorf("refusing private→public without -y (non-interactive)")
+					if err := promptConfirm(fmt.Sprintf("Make %s public? This invalidates the private token.", id)); err != nil {
+						return err
 					}
-					if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Make %s public? This invalidates the private token.", id)) {
-						return fmt.Errorf("aborted")
-					}
-					confirmExtra = 1
 				}
 			}
-
-			// Wipe file table + select lines before spinner / result table.
-			ui.ClearLinesUp(os.Stderr, clearLines+visClear+confirmExtra)
 
 			raw, err := ui.WaitVal("Updating visibility…", func() (map[string]any, error) {
 				return c.SetVisibility(id, vis)
@@ -379,11 +370,8 @@ func newFilesRevokeCmd() *cobra.Command {
 				return err
 			}
 			if !yes {
-				if !ui.IsTTY(os.Stdin) || flagJSON {
-					return fmt.Errorf("refusing revoke without -y (non-interactive)")
-				}
-				if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Revoke share for %s?", id)) {
-					return fmt.Errorf("aborted")
+				if err := promptConfirm(fmt.Sprintf("Revoke share for %s?", id)); err != nil {
+					return err
 				}
 			}
 			if err := ui.WithSpinner("Revoking…", func() error {
@@ -419,11 +407,8 @@ func newFilesRotateTokenCmd() *cobra.Command {
 				return err
 			}
 			if !yes {
-				if !ui.IsTTY(os.Stdin) || flagJSON {
-					return fmt.Errorf("refusing rotate-token without -y (non-interactive)")
-				}
-				if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Rotate access token for %s?", id)) {
-					return fmt.Errorf("aborted")
+				if err := promptConfirm(fmt.Sprintf("Rotate access token for %s?", id)); err != nil {
+					return err
 				}
 			}
 			raw, err := ui.WaitVal("Rotating token…", func() (map[string]any, error) {
@@ -467,11 +452,8 @@ func newFilesDeleteCmd() *cobra.Command {
 				return err
 			}
 			if !yes {
-				if !ui.IsTTY(os.Stdin) || flagJSON {
-					return fmt.Errorf("refusing delete without -y (non-interactive)")
-				}
-				if !ui.Confirm(os.Stderr, os.Stdin, fmt.Sprintf("Delete %s?", id)) {
-					return fmt.Errorf("aborted")
+				if err := promptConfirm(fmt.Sprintf("Delete %s?", id)); err != nil {
+					return err
 				}
 			}
 			if err := ui.WithSpinner("Deleting…", func() error {
@@ -523,55 +505,83 @@ func resolveFileID(c *client.Client, id string) (string, error) {
 	if len(files) == 0 {
 		return "", fmt.Errorf("no files to select")
 	}
-	idx, err := ui.PickFile(os.Stderr, os.Stdin, toUIFiles(files))
-	if err != nil {
+	opts := make([]huh.Option[string], len(files))
+	for i, f := range files {
+		opts[i] = huh.NewOption(fmt.Sprintf("%s · %s", f.FileName, f.FileID), f.FileID)
+	}
+	var picked string
+	if err := huh.NewSelect[string]().
+		Title("Select file").
+		Options(opts...).
+		Value(&picked).
+		Run(); err != nil {
 		return "", err
 	}
-	return files[idx].FileID, nil
+	return picked, nil
 }
 
-// pickFileStayVisibility opens the file picker and keeps the table visible for
-// the next prompt (visibility). Returns the file id, its current visibility,
-// and how many stderr lines to ClearLinesUp after the follow-up prompts.
-func pickFileStayVisibility(c *client.Client) (id, cur string, clearLines int, err error) {
+// pickFileVisibility opens the file picker and returns id + current visibility.
+func pickFileVisibility(c *client.Client) (id, cur string, err error) {
 	if flagJSON {
-		return "", "", 0, fmt.Errorf("file id required with --json (interactive picker disabled)")
+		return "", "", fmt.Errorf("file id required with --json (interactive picker disabled)")
 	}
 	if !ui.IsTTY(os.Stdin) {
-		return "", "", 0, fmt.Errorf("file id required (interactive picker needs a TTY)")
+		return "", "", fmt.Errorf("file id required (interactive picker needs a TTY)")
 	}
 	files, err := fetchFilesForPicker(c)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", err
 	}
 	if len(files) == 0 {
-		return "", "", 0, fmt.Errorf("no files to select")
+		return "", "", fmt.Errorf("no files to select")
 	}
-	idx, clearLines, err := ui.PickFileStay(os.Stderr, os.Stdin, toUIFiles(files))
-	if err != nil {
-		return "", "", 0, err
+	opts := make([]huh.Option[string], len(files))
+	byID := make(map[string]string, len(files))
+	for i, f := range files {
+		opts[i] = huh.NewOption(fmt.Sprintf("%s · %s", f.FileName, f.FileID), f.FileID)
+		byID[f.FileID] = f.Visibility
 	}
-	return files[idx].FileID, files[idx].Visibility, clearLines, nil
+	var picked string
+	if err := huh.NewSelect[string]().
+		Title("Select file").
+		Options(opts...).
+		Value(&picked).
+		Run(); err != nil {
+		return "", "", err
+	}
+	return picked, byID[picked], nil
 }
 
-// resolveVisibility returns public|private, or opens a ↑↓ picker when empty.
-// defaultVis is the starting selection in the picker (usually the file's current visibility).
-// clearExtra is 1 when the picker left a result line on stderr.
-func resolveVisibility(arg, defaultVis string) (vis string, clearExtra int, err error) {
+// resolveVisibility returns public|private, or opens a Select when empty.
+func resolveVisibility(arg, defaultVis string) (string, error) {
 	arg = strings.TrimSpace(arg)
 	if arg == "public" || arg == "private" {
-		return arg, 0, nil
+		return arg, nil
 	}
 	if arg != "" {
-		return "", 0, fmt.Errorf("visibility must be public or private")
+		return "", fmt.Errorf("visibility must be public or private")
 	}
 	if flagJSON {
-		return "", 0, fmt.Errorf("visibility required with --json (interactive picker disabled)")
+		return "", fmt.Errorf("visibility required with --json (interactive picker disabled)")
 	}
 	if !ui.IsTTY(os.Stdin) {
-		return "", 0, fmt.Errorf("visibility required (interactive picker needs a TTY)")
+		return "", fmt.Errorf("visibility required (interactive picker needs a TTY)")
 	}
-	return ui.PickChoice(os.Stderr, os.Stdin, "Visibility", []string{"public", "private"}, defaultVis)
+	vis := defaultVis
+	if vis != "public" && vis != "private" {
+		vis = "private"
+	}
+	if err := huh.NewSelect[string]().
+		Title("Visibility").
+		Options(
+			huh.NewOption("public", "public"),
+			huh.NewOption("private", "private"),
+		).
+		Value(&vis).
+		Run(); err != nil {
+		return "", err
+	}
+	return vis, nil
 }
 
 func fetchFilesForPicker(c *client.Client) ([]FileItem, error) {

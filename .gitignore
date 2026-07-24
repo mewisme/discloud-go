@@ -38,4 +38,6 @@ pnpm-debug.log*
 .playwright-mcp/
 .note*
 
+*.bin
+
 plans/

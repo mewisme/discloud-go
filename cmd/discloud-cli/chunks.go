@@ -22,7 +22,7 @@ func newChunksCheckCmd() *cobra.Command {
 		Short: "Check whether a chunk exists",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			hash, err := ui.ResolveArg(ui.ArgOrEmpty(args, 0), "SHA-256: ")
+			hash, err := promptArg(ui.ArgOrEmpty(args, 0), "SHA-256")
 			if err != nil {
 				return err
 			}
@@ -47,7 +47,7 @@ func newChunksPutCmd() *cobra.Command {
 		Short: "Upload a raw chunk",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			path, err := ui.ResolveArg(ui.ArgOrEmpty(args, 0), "Path: ")
+			path, err := promptArg(ui.ArgOrEmpty(args, 0), "Path")
 			if err != nil {
 				return err
 			}

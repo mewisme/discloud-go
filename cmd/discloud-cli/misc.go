@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"charm.land/huh/v2"
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/spf13/cobra"
@@ -114,24 +115,21 @@ func newConfigSetCmd() *cobra.Command {
 			originSet := cmd.Flags().Changed("origin")
 			tokenSet := setToken || clearToken
 
-			promptedBaseOrigin := false
-			promptedToken := false
-			token := ""
-
 			if !baseSet && !originSet && !tokenSet {
 				if flagJSON {
 					return fmt.Errorf("pass --base, --origin, and/or --token with --json")
 				}
-				var err error
-				base, err = ui.PromptDefault("Base: ", cfg.BaseURL)
-				if err != nil {
+				if !ui.IsTTY(os.Stdin) {
+					return fmt.Errorf("pass --base, --origin, and/or --token (interactive prompts need a TTY)")
+				}
+				base = cfg.BaseURL
+				origin = cfg.Origin
+				if err := huh.NewInput().Title("Base").Value(&base).Run(); err != nil {
 					return err
 				}
-				origin, err = ui.PromptDefault("Origin: ", cfg.Origin)
-				if err != nil {
+				if err := huh.NewInput().Title("Origin").Value(&origin).Run(); err != nil {
 					return err
 				}
-				promptedBaseOrigin = true
 			} else {
 				if !baseSet {
 					base = "" // keep file value via SaveConfigFile merge
@@ -141,22 +139,16 @@ func newConfigSetCmd() *cobra.Command {
 				}
 			}
 
+			token := ""
 			if clearToken {
 				token = ""
 			} else if setToken {
-				if flagJSON {
-					return fmt.Errorf("token prompts interactively; omit --json or set DISCLOUD_TOKEN in the environment")
-				}
 				var err error
-				token, err = ui.ReadPasswordPrompt("Token: ")
+				token, err = promptPassword("Token")
 				if err != nil {
 					return err
 				}
 				token = strings.TrimSpace(token)
-				if token == "" {
-					return fmt.Errorf("token is required")
-				}
-				promptedToken = true
 			}
 
 			_, _, _, _, err := client.SaveConfigFileOpts(base, origin, token, tokenSet)
@@ -174,12 +166,6 @@ func newConfigSetCmd() *cobra.Command {
 					out["token"] = maskAPIToken(cfg.Token)
 				}
 				return writeJSON(out)
-			}
-			if promptedBaseOrigin {
-				ui.ClearLinesUp(os.Stderr, 2)
-			}
-			if promptedToken {
-				ui.ClearLinesUp(os.Stderr, 1)
 			}
 			return printConfigTable(client.DefaultConfig())
 		}),

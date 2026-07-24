@@ -222,22 +222,56 @@ func PrintFileTable(w io.Writer, files []File) error {
 	return printTable(w, headers, rows, []bool{false, false, true, false, false, false}, 1, 0)
 }
 
-// printPickFileTable is PrintFileTable with a 1-based # column for selection.
-func printPickFileTable(w io.Writer, files []File) error {
-	headers := []string{"#", "ID", "NAME", "SIZE", "STATUS", "VISIBILITY", "EXPIRES"}
-	rows := make([][]string, len(files))
-	for i, f := range files {
-		rows[i] = []string{
-			strconv.Itoa(i + 1),
-			f.ID,
-			f.Name,
-			client.FormatBytes(f.Size),
-			ShortStatus(f.Status),
-			ShortVis(f.Visibility),
-			formatTimeShort(f.Expires),
+// UploadRow is one successful upload for PrintUploadTable.
+type UploadRow struct {
+	Name, ID, SHA256, AccessToken, Status string
+	Size                                  int64
+}
+
+// PrintUploadTable prints the post-upload summary table.
+func PrintUploadTable(w io.Writer, items []UploadRow) error {
+	if len(items) == 0 {
+		return nil
+	}
+	showSHA := false
+	showTok := false
+	for _, it := range items {
+		if it.SHA256 != "" {
+			showSHA = true
+		}
+		if it.AccessToken != "" {
+			showTok = true
 		}
 	}
-	return printTable(w, headers, rows, []bool{true, false, false, true, false, false, false}, 2, 1)
+	headers := []string{"NAME", "SIZE", "STATUS", "ID"}
+	right := []bool{false, true, false, false}
+	prefer := []int{0, 3}
+	if showSHA {
+		headers = append(headers, "SHA256")
+		right = append(right, false)
+		prefer = append([]int{len(headers) - 1}, prefer...)
+	}
+	if showTok {
+		headers = append(headers, "TOKEN")
+		right = append(right, false)
+		prefer = append([]int{len(headers) - 1}, prefer...)
+	}
+	rows := make([][]string, len(items))
+	for i, it := range items {
+		row := []string{it.Name, client.FormatBytes(it.Size), ShortStatus(it.Status), it.ID}
+		if showSHA {
+			row = append(row, sha256OrDash(it.SHA256))
+		}
+		if showTok {
+			tok := it.AccessToken
+			if tok == "" {
+				tok = "-"
+			}
+			row = append(row, tok)
+		}
+		rows[i] = row
+	}
+	return printTable(w, headers, rows, right, prefer...)
 }
 
 // PrintInspect prints file analytics as KV blocks.
@@ -422,6 +456,8 @@ func paintTyped(on bool, padded, raw, stringCode string) string {
 		return Dim(on, padded)
 	case t == "true", t == "ok", t == "ready", t == "up", t == "public":
 		return Green(on, padded)
+	case t == "reused":
+		return Cyan(on, padded)
 	case t == "false", t == "fail", t == "error", t == "down":
 		return Red(on, padded)
 	case t == "private":

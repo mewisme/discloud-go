@@ -2,163 +2,184 @@ package ui
 
 import (
 	"bytes"
-	"net/url"
-	"os"
+	"regexp"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/mewisme/discloud-go/internal/client"
+	"charm.land/lipgloss/v2"
 )
 
-func TestReadPasswordStdin(t *testing.T) {
+func TestFitNameDisplayWidth(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name    string
-		in      string
-		want    string
-		wantErr bool
-	}{
-		{"lf", "secret\n", "secret", false},
-		{"crlf", "secret\r\n", "secret", false},
-		{"no newline eof", "secret", "secret", false},
-		{"empty", "\n", "", true},
-		{"empty eof", "", "", true},
-		{"keeps spaces", "  x  \n", "  x  ", false},
+	const w = 12
+	names := []string{
+		"a.bin",
+		"medium-file.bin",
+		"this-is-a-very-long-filename.bin",
+		"ファイル.bin",
+		"📦-archive.bin",
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := readPasswordStdin(strings.NewReader(tc.in))
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != tc.want {
-				t.Fatalf("got %q want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestReadPasswordMasked(t *testing.T) {
-	t.Parallel()
-	var out bytes.Buffer
-	// type a,b, backspace, c, enter
-	got, err := readPasswordMasked(strings.NewReader("ab\x7fc\r"), &out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "ac" {
-		t.Fatalf("got %q want ac", got)
-	}
-	if !strings.Contains(out.String(), "***") && !strings.Contains(out.String(), "**") {
-		// a* b* backspace erase c* → at least two stars written
-	}
-	stars := strings.Count(out.String(), "*")
-	if stars != 3 { // a, b, c each echo *
-		t.Fatalf("stars=%d out=%q", stars, out.String())
-	}
-}
-
-func TestResolveArg(t *testing.T) {
-	t.Parallel()
-	got, err := ResolveArg("abc", "SHA-256: ")
-	if err != nil || got != "abc" {
-		t.Fatalf("got %q %v", got, err)
-	}
-	JSON = true
-	t.Cleanup(func() { JSON = false })
-	_, err = ResolveArg("", "SHA-256: ")
-	if err == nil || !strings.Contains(err.Error(), "SHA-256 is required") {
-		t.Fatalf("want required error, got %v", err)
-	}
-}
-
-func TestFieldName(t *testing.T) {
-	t.Parallel()
-	if got := fieldName("Username: "); got != "Username" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestReadLinePrefill(t *testing.T) {
-	t.Parallel()
-	var out bytes.Buffer
-	// prefill "ab", backspace once, type "c", enter → "ac"
-	got, err := readLinePrefill(strings.NewReader("\x7fc\r"), &out, []byte("ab"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "ac" {
-		t.Fatalf("got %q want ac", got)
-	}
-}
-
-func TestConfirmDefaultNo(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   string
-		want bool
-	}{
-		{"empty", "\n", false},
-		{"n", "n\n", false},
-		{"no", "no\n", false},
-		{"garbage", "maybe\n", false},
-		{"y", "y\n", true},
-		{"yes", "yes\n", true},
-		{"Y", "Y\n", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var out bytes.Buffer
-			got := Confirm(&out, strings.NewReader(tc.in), "Sure?")
-			if got != tc.want {
-				t.Fatalf("got %v want %v", got, tc.want)
-			}
-		})
-	}
-	t.Run("eof", func(t *testing.T) {
-		var out bytes.Buffer
-		if Confirm(&out, strings.NewReader(""), "Sure?") {
-			t.Fatal("EOF should be No")
+	for _, n := range names {
+		got := fitName(n, w)
+		if dw := lipgloss.Width(got); dw != w {
+			t.Fatalf("fitName(%q,%d)=%q width %d want %d", n, w, got, dw, w)
 		}
-	})
-}
-
-func TestResolvePasswordConflict(t *testing.T) {
-	t.Parallel()
-	_, err := ResolvePassword("pos", true)
-	if err == nil {
-		t.Fatal("expected conflict error")
+	}
+	if !strings.Contains(fitName("this-is-a-very-long-filename.bin", 12), "…") {
+		t.Fatal("expected ellipsis on long name")
 	}
 }
 
-func TestProgressBarFinish100(t *testing.T) {
+func TestProgressLayoutSharedNameWidth(t *testing.T) {
+	t.Parallel()
+	names := []string{"a.bin", "medium-file.bin", "this-is-a-very-long-filename.bin"}
+	layout := NewProgressLayoutSized(names, 24)
+	if layout.NameWidth != 24 {
+		t.Fatalf("NameWidth=%d want 24 (capped)", layout.NameWidth)
+	}
+	short := fitName("a.bin", layout.NameWidth)
+	long := fitName("this-is-a-very-long-filename.bin", layout.NameWidth)
+	if lipgloss.Width(short) != lipgloss.Width(long) {
+		t.Fatalf("fitted names differ: %q (%d) vs %q (%d)",
+			short, lipgloss.Width(short), long, lipgloss.Width(long))
+	}
+}
+
+func TestProgressStatusTransitions(t *testing.T) {
+	t.Parallel()
+	files := []ProgressFile{
+		{Name: "a.bin", Total: 100},
+		{Name: "b.bin", Total: 100},
+	}
+	m := newProgressModel(files, NewProgressLayout([]string{"a.bin", "b.bin"}), 120, nil)
+	if m.rows[0].status != statusWaiting || m.rows[1].status != statusWaiting {
+		t.Fatal("expected Waiting")
+	}
+	_, _ = m.Update(fileProgressMsg{id: 0, sent: 40})
+	if m.rows[0].status != statusUploading {
+		t.Fatalf("got %v want Uploading", m.rows[0].status)
+	}
+	if m.rows[1].status != statusWaiting {
+		t.Fatal("untouched row must stay Waiting")
+	}
+	_, _ = m.Update(fileDoneMsg{id: 0})
+	if m.rows[0].status != statusComplete || m.rows[0].sent != 100 {
+		t.Fatalf("complete: status=%v sent=%d", m.rows[0].status, m.rows[0].sent)
+	}
+}
+
+func TestProgressStatusIconColored(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		s     fileStatus
+		glyph string
+	}{
+		{statusWaiting, "○"},
+		{statusUploading, "●"},
+		{statusComplete, IconOK},
+		{statusAborted, IconFail},
+	}
+	for _, tc := range cases {
+		got := tc.s.statusIcon()
+		plain := ansiEscape.ReplaceAllString(got, "")
+		if plain != tc.glyph {
+			t.Fatalf("%v: plain=%q want %q (raw %q)", tc.s, plain, tc.glyph, got)
+		}
+		if got == plain {
+			t.Fatalf("%v: expected ANSI color on %q", tc.s, tc.glyph)
+		}
+	}
+}
+
+func TestProgressViewColumnAlignment(t *testing.T) {
+	t.Parallel()
+	names := []string{
+		"a.bin",
+		"medium-file.bin",
+		"this-is-a-very-long-filename.bin",
+		"ファイル.bin",
+		"📦-archive.bin",
+	}
+	files := make([]ProgressFile, len(names))
+	for i, n := range names {
+		files[i] = ProgressFile{Name: n, Total: int64((i + 1) * 1024 * 1024)}
+	}
+	layout := NewProgressLayoutSized(names, 24)
+	m := newProgressModel(files, layout, 140, nil)
+	_, _ = m.Update(fileProgressMsg{id: 0, sent: 0})
+	_, _ = m.Update(fileProgressMsg{id: 1, sent: files[1].Total / 2})
+	_, _ = m.Update(fileDoneMsg{id: 2})
+	_, _ = m.Update(fileProgressMsg{id: 3, sent: 100})
+	// row 4 stays Waiting
+
+	raw := m.renderAllPlain()
+	lines := strings.Split(raw, "\n")
+	if len(lines) != len(names) {
+		t.Fatalf("got %d lines want %d\n%s", len(lines), len(names), raw)
+	}
+	type cols struct{ bar, cur, pct, spd int }
+	var first cols
+	for i, line := range lines {
+		plain := ansiEscape.ReplaceAllString(line, "")
+		c, ok := progressColCells(plain)
+		if !ok {
+			t.Fatalf("line %d: parse failed: %q", i, plain)
+		}
+		if i == 0 {
+			first = c
+			continue
+		}
+		if c != first {
+			t.Fatalf("row %d cols %+v != row 0 %+v\n  %q\n  %q", i, c, first, lines[0], plain)
+		}
+	}
+}
+
+func TestUploadProgressWaitSmoke(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	bar := NewProgressBar(&buf)
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func(n int64) {
-			defer wg.Done()
-			bar.Update(n, 100)
-		}(int64((i + 1) * 10))
+	prog := NewUploadProgress(&buf, []ProgressFile{{Name: "readme.md", Total: 100}})
+	bar := prog.Bar(0)
+	bar.Update(50, 100)
+	time.Sleep(50 * time.Millisecond)
+	bar.Done()
+	prog.Wait()
+	prog.Wait() // idempotent
+}
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// progressColCells returns terminal-cell starts of bar, transferred, %, speed.
+func progressColCells(plain string) (c struct{ bar, cur, pct, spd int }, ok bool) {
+	barAt := -1
+	for i, r := range plain {
+		if r == '━' || r == '─' {
+			barAt = i
+			break
+		}
 	}
-	wg.Wait()
-	bar.Finish()
-	s := buf.String()
-	if !strings.Contains(s, "100%") {
-		t.Fatalf("expected 100%% in %q", s)
+	if barAt < 0 {
+		return c, false
 	}
+	c.bar = lipgloss.Width(plain[:barAt])
+
+	i := barAt
+	for _, r := range plain[barAt:] {
+		if r != '━' && r != '─' {
+			break
+		}
+		i += len(string(r))
+	}
+	c.cur = lipgloss.Width(plain[:i])
+
+	pctAt := strings.IndexByte(plain, '%')
+	if pctAt < 0 {
+		return c, false
+	}
+	c.pct = lipgloss.Width(plain[:pctAt])
+	c.spd = lipgloss.Width(plain[:pctAt+1])
+	return c, true
 }
 
 func TestTableRule(t *testing.T) {
@@ -228,6 +249,30 @@ func TestContentWidthsAndFit(t *testing.T) {
 	}
 }
 
+func TestPrintUploadTableStatus(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := PrintUploadTable(&buf, []UploadRow{
+		{Name: "a.bin", Size: 10, Status: "ready", ID: "id1"},
+		{Name: "b.bin", Size: 20, Status: "reused", ID: "id2"},
+		{Name: "c.bin", Size: 30, Status: "", ID: "id3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "STATUS") {
+		t.Fatalf("missing STATUS header:\n%s", out)
+	}
+	if !strings.Contains(out, "ready") || !strings.Contains(out, "reused") {
+		t.Fatalf("missing status values:\n%s", out)
+	}
+	// empty Status → ShortStatus defaults to ready (appears twice: row0 + row2)
+	if n := strings.Count(out, "ready"); n < 2 {
+		t.Fatalf("empty status should show ready; got %d ready in:\n%s", n, out)
+	}
+}
+
 func TestPadRight(t *testing.T) {
 	t.Parallel()
 	if got := padRight("abcdef", 4); got != "abc…" {
@@ -235,93 +280,6 @@ func TestPadRight(t *testing.T) {
 	}
 	if got := padRight("ab", 4); got != "ab  " {
 		t.Fatalf("pad got %q", got)
-	}
-}
-
-func TestPickIndex(t *testing.T) {
-	t.Parallel()
-	var out bytes.Buffer
-	idx, err := pickIndex(&out, strings.NewReader("2\n"), []string{"a", "b", "c"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if idx != 1 {
-		t.Fatalf("got %d", idx)
-	}
-	_, err = pickIndex(&out, strings.NewReader("9\n"), []string{"a"})
-	if err == nil {
-		t.Fatal("expected invalid selection")
-	}
-}
-
-func TestPickFileTyped(t *testing.T) {
-	t.Parallel()
-	files := []File{
-		{ID: "aaa", Name: "a.bin", Size: 1, Visibility: "public"},
-		{ID: "bbb", Name: "b.bin", Size: 2, Visibility: "private"},
-	}
-	var out bytes.Buffer
-	idx, err := PickFile(&out, strings.NewReader("2\n"), files)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if idx != 1 {
-		t.Fatalf("got %d", idx)
-	}
-	if !strings.Contains(out.String(), "#") || !strings.Contains(out.String(), "b.bin") {
-		t.Fatalf("expected pick table, got %q", out.String())
-	}
-}
-
-func TestPickChoiceTyped(t *testing.T) {
-	t.Parallel()
-	var out bytes.Buffer
-	got, _, err := PickChoice(&out, strings.NewReader("2\n"), "Visibility", []string{"public", "private"}, "public")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "private" {
-		t.Fatalf("got %q", got)
-	}
-	s := out.String()
-	if !strings.Contains(s, "Visibility (↑↓):") {
-		t.Fatalf("expected single-line hint, got %q", s)
-	}
-}
-
-func TestPickChoiceDefaultEmptyEnter(t *testing.T) {
-	t.Parallel()
-	var out bytes.Buffer
-	got, extra, err := PickChoice(&out, strings.NewReader("\n"), "Visibility", []string{"public", "private"}, "private")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "private" {
-		t.Fatalf("got %q, want default private", got)
-	}
-	if extra != 1 {
-		t.Fatalf("clearExtra = %d, want 1", extra)
-	}
-}
-
-func TestPrintGlyphTable(t *testing.T) {
-	t.Parallel()
-	var out bytes.Buffer
-	if err := PrintGlyphTable(&out, [][]string{
-		{IconOK, "Visibility", "private"},
-		{IconOK, "Token", "tok"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	s := out.String()
-	if !strings.Contains(s, "FIELD") || !strings.Contains(s, "VALUE") {
-		t.Fatalf("expected headers, got %q", s)
-	}
-	if !strings.Contains(s, IconOK) || !strings.Contains(s, "Visibility") || !strings.Contains(s, "private") {
-		t.Fatalf("got %q", s)
-	}
-	if !strings.Contains(s, "+") || !strings.Contains(s, "|") {
-		t.Fatalf("expected table borders, got %q", s)
 	}
 }
 
@@ -348,39 +306,12 @@ func TestDisplayWidthGlyph(t *testing.T) {
 	}
 }
 
-func TestDescribeError(t *testing.T) {
+func TestArgOrEmpty(t *testing.T) {
 	t.Parallel()
-	title, detail, hint := describeError(&client.Error{Status: 401, Message: "Not signed in"})
-	if title != "Not signed in" || detail != "HTTP 401" || hint == "" {
-		t.Fatalf("api: %q %q %q", title, detail, hint)
+	if got := ArgOrEmpty([]string{"a", "b"}, 0); got != "a" {
+		t.Fatalf("got %q", got)
 	}
-	title, detail, hint = describeError(&url.Error{
-		Op:  "Get",
-		URL: "http://localhost:8080/healthz",
-		Err: syscall.ECONNREFUSED,
-	})
-	if title != "Cannot reach API" || !strings.Contains(detail, "localhost") || hint == "" {
-		t.Fatalf("conn: %q %q %q", title, detail, hint)
+	if got := ArgOrEmpty([]string{"a"}, 2); got != "" {
+		t.Fatalf("got %q", got)
 	}
-}
-
-func TestColorNO_COLOR(t *testing.T) {
-	t.Setenv("NO_COLOR", "1")
-	if ColorOn(os.Stdout) {
-		t.Fatal("NO_COLOR should disable color")
-	}
-	if Green(false, "x") != "x" {
-		t.Fatal("paint disabled should be plain")
-	}
-	if Green(true, "x") == "x" {
-		t.Fatal("paint enabled should wrap")
-	}
-}
-
-func TestSpinnerStop(t *testing.T) {
-	var buf bytes.Buffer
-	s := startSpinner(&buf, "Working…")
-	time.Sleep(120 * time.Millisecond)
-	s.Stop()
-	s.Stop() // idempotent
 }

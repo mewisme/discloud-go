@@ -37,7 +37,6 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		newAuthCmd(),
 		newUploadCmd(),
-		newUploadRawCmd(),
 		newChunksCmd(),
 		newGetCmd(),
 		newFilesCmd(),
