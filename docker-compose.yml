@@ -6,7 +6,7 @@ services:
     image: ghcr.io/mewisme/discloud:${DISCLOUD_TAG:-latest}
     pull_policy: always
     environment:
-      DISCLOUD_PORT: "8080"
+      DISCLOUD_PORT: 8080
       DISCLOUD_DATABASE_URL: postgres://discloud:${POSTGRES_PASSWORD:-discloud}@postgres:5432/discloud
       DISCLOUD_VALKEY_URL: valkey://valkey:6379
       DISCLOUD_BOT_TOKEN: ${DISCLOUD_BOT_TOKEN:-}
@@ -17,7 +17,7 @@ services:
       DISCLOUD_CORS: ${DISCLOUD_CORS:-http://localhost:3000}
       DISCLOUD_CAPTCHA_SECRET: ${DISCLOUD_CAPTCHA_SECRET:-}
     ports:
-      - "8080:8080"
+      - 8080:8080
     volumes:
       # Persists .app.secret + .visitor.secret (WORKDIR /data).
       - data:/data
@@ -43,7 +43,7 @@ services:
       DISCLOUD_CAPTCHA_KEY: ${DISCLOUD_CAPTCHA_KEY:-}
       NODE_OPTIONS: --max-old-space-size=192
     ports:
-      - "3000:3000"
+      - 3000:3000
     depends_on:
       - api
     networks: [discloud]
