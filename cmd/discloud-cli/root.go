@@ -69,7 +69,6 @@ func newVersionCmd() *cobra.Command {
 			if flagJSON {
 				return writeJSON(info)
 			}
-			ui.PrintSuccess("%s", ui.Bold(ui.ColorOn(os.Stdout), "DisCloud CLI"))
 			return ui.PrintKVTable(os.Stdout, [][]string{
 				{"version", info["version"]},
 				{"go", info["go"]},

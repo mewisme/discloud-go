@@ -120,3 +120,102 @@ func TestNormalizeBotTokens(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestNormalizeHexColor(t *testing.T) {
+	got, err := NormalizeHexColor(" #AbC ")
+	if err != nil || got != "#abc" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	got, err = NormalizeHexColor("ff00aa")
+	if err != nil || got != "#ff00aa" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	if _, err := NormalizeHexColor("#gg0000"); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := NormalizeHexColor("#12345"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCustomizeSaveLoad(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("APPDATA", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	// Preserve customize across self-upload write.
+	c := CustomizeConfig{
+		Upload: &TransferUIConfig{
+			ProgressBar: ProgressBarConfig{Colors: []string{"#f00", "#00FF00"}},
+		},
+		Download: &TransferUIConfig{
+			ProgressBar: ProgressBarConfig{Colors: []string{"#0000ff"}},
+		},
+	}
+	if err := SaveCustomize(&c); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveSelfUpload(&SelfUploadConfig{BotTokens: []string{"t"}, GuildID: "1", ChannelID: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadCustomize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := got.ProgressColors("upload")
+	if len(up) != 2 || up[0] != "#f00" || up[1] != "#00ff00" {
+		t.Fatalf("upload=%v", up)
+	}
+	down := got.ProgressColors("download")
+	if len(down) != 1 || down[0] != "#0000ff" {
+		t.Fatalf("download=%v", down)
+	}
+
+	if err := SaveCustomize(&CustomizeConfig{
+		Upload: &TransferUIConfig{ProgressBar: ProgressBarConfig{Colors: []string{"not-hex"}}},
+	}); err == nil {
+		t.Fatal("expected invalid color error")
+	}
+
+	if err := SaveCustomize(&CustomizeConfig{PromptTheme: "charm"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadCustomize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PromptThemeOrDefault() != "charm" {
+		t.Fatalf("promptTheme=%q", got.PromptTheme)
+	}
+
+	if err := SaveCustomize(&CustomizeConfig{PromptTheme: "nope"}); err == nil {
+		t.Fatal("expected invalid prompt theme error")
+	}
+}
+
+func TestNormalizePromptTheme(t *testing.T) {
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"", "base16", true},
+		{"Base 16", "base16", true},
+		{"charm", "charm", true},
+		{"DRACULA", "dracula", true},
+		{"catppuccin", "catppuccin", true},
+		{"default", "default", true},
+		{"nope", "", false},
+	}
+	for _, tc := range cases {
+		got, err := NormalizePromptTheme(tc.in)
+		if tc.ok {
+			if err != nil || got != tc.want {
+				t.Fatalf("%q: got %q err=%v want %q", tc.in, got, err, tc.want)
+			}
+			continue
+		}
+		if err == nil {
+			t.Fatalf("%q: expected error", tc.in)
+		}
+	}
+}

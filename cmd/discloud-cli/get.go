@@ -233,7 +233,7 @@ func getSelfBundle(path string, f getFlags) error {
 	if outPath == "" {
 		if !flagJSON && ui.IsTTY(os.Stdin) {
 			outPath = "."
-			if err := huh.NewInput().Title("Output path").Value(&outPath).Run(); err != nil {
+			if err := runHuh(huh.NewInput().Title("Output path").Value(&outPath)); err != nil {
 				return err
 			}
 		} else {
@@ -408,12 +408,11 @@ func resolveDownloadConflicts(outDir string, files []selfmanaged.FileMeta, force
 		msg = fmt.Sprintf("Overwrite existing file(s)?\n%s", strings.Join(conflicts, "\n"))
 	}
 	var overwrite bool
-	if err := huh.NewConfirm().
+	if err := runHuh(huh.NewConfirm().
 		Title(msg).
 		Affirmative("Overwrite").
 		Negative("Keep both (rename)").
-		Value(&overwrite).
-		Run(); err != nil {
+		Value(&overwrite)); err != nil {
 		return nil, err
 	}
 	if overwrite {

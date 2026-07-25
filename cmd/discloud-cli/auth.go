@@ -310,12 +310,23 @@ func newAuthTokenCreateCmd() *cobra.Command {
 		Short: "Create a personal access token (raw secret shown once)",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(name) == "" {
-				return fmt.Errorf("--name is required")
+			needPrompt := strings.TrimSpace(name) == "" || strings.TrimSpace(scopesCSV) == ""
+			var err error
+			name, err = promptArg(name, "Token name")
+			if err != nil {
+				return err
 			}
-			scopes := splitCSV(scopesCSV)
-			if len(scopes) == 0 {
-				return fmt.Errorf("--scopes is required (upload,read,manage,admin)")
+			scopes, err := promptTokenScopes(scopesCSV)
+			if err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("expires") && needPrompt {
+				expires, err = promptTokenExpires()
+				if err != nil {
+					return err
+				}
+			} else {
+				expires = strings.TrimSpace(expires)
 			}
 			c, err := apiClient()
 			if err != nil {
@@ -334,8 +345,7 @@ func newAuthTokenCreateCmd() *cobra.Command {
 			}
 			raw, _ := out["token"].(string)
 			id, _ := out["id"].(string)
-			ui.PrintSuccess("Token created (copy the secret now; it will not be shown again)")
-			return ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{
+			if err := ui.PrintKVBlocks(os.Stdout, []ui.KVBlock{{
 				Title: "API token",
 				Rows: [][]string{
 					{"id", id},
@@ -343,15 +353,68 @@ func newAuthTokenCreateCmd() *cobra.Command {
 					{"scopes", strings.Join(scopes, ",")},
 					{"token", raw},
 				},
-			}})
+			}}); err != nil {
+				return err
+			}
+			ui.PrintSuccess("Token created (copy the secret now; it will not be shown again)")
+			return nil
 		}),
 	}
-	cmd.Flags().StringVar(&name, "name", "", "Token label")
-	cmd.Flags().StringVar(&scopesCSV, "scopes", "", "Comma-separated scopes: upload,read,manage,admin")
-	cmd.Flags().StringVar(&expires, "expires", "", "Optional RFC3339 expiry (max 1 year)")
-	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("scopes")
+	cmd.Flags().StringVar(&name, "name", "", "Token label (prompted if omitted)")
+	cmd.Flags().StringVar(&scopesCSV, "scopes", "", "Comma-separated scopes: upload,read,manage,admin (prompted if omitted)")
+	cmd.Flags().StringVar(&expires, "expires", "", "Optional RFC3339 expiry (max 1 year; prompted interactively when creating without flags)")
 	return cmd
+}
+
+func promptTokenScopes(csv string) ([]string, error) {
+	if scopes := splitCSV(csv); len(scopes) > 0 {
+		return scopes, nil
+	}
+	if flagJSON {
+		return nil, fmt.Errorf("--scopes is required with --json")
+	}
+	if !ui.IsTTY(os.Stdin) {
+		return nil, fmt.Errorf("--scopes is required (upload,read,manage,admin)")
+	}
+	var picked []string
+	err := runHuh(huh.NewMultiSelect[string]().
+		Title("Scopes").
+		Description("Space to toggle, Enter to confirm").
+		Options(
+			huh.NewOption("upload", "upload"),
+			huh.NewOption("read", "read"),
+			huh.NewOption("manage", "manage"),
+			huh.NewOption("admin", "admin"),
+		).
+		Filterable(false).
+		Height(6).
+		Value(&picked).
+		Validate(func(s []string) error {
+			if len(s) == 0 {
+				return fmt.Errorf("pick at least one scope")
+			}
+			return nil
+		}))
+	if err != nil {
+		return nil, err
+	}
+	return picked, nil
+}
+
+func promptTokenExpires() (string, error) {
+	if flagJSON || !ui.IsTTY(os.Stdin) {
+		return "", nil
+	}
+	var exp string
+	err := runHuh(huh.NewInput().
+		Title("Expires (optional)").
+		Description("RFC3339 timestamp, or leave empty for no expiry").
+		Placeholder("never").
+		Value(&exp))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(exp), nil
 }
 
 func newAuthTokenListCmd() *cobra.Command {
@@ -470,7 +533,6 @@ func newAuthTokenInfoCmd() *cobra.Command {
 			if me.Token == nil || !me.Token.Valid {
 				return fmt.Errorf("invalid, revoked, or expired token")
 			}
-			ui.PrintSuccess("Token valid")
 			scopes := strings.Join(me.Token.Scopes, ",")
 			expires := "never"
 			if me.Token.ExpiresAt != nil {
@@ -569,7 +631,7 @@ func promptArg(arg, title string) (string, error) {
 		return "", fmt.Errorf("%s is required", title)
 	}
 	var v string
-	err := huh.NewInput().
+	err := runHuh(huh.NewInput().
 		Title(title).
 		Value(&v).
 		Validate(func(s string) error {
@@ -577,8 +639,7 @@ func promptArg(arg, title string) (string, error) {
 				return fmt.Errorf("%s is required", title)
 			}
 			return nil
-		}).
-		Run()
+		}))
 	if err != nil {
 		return "", err
 	}
@@ -607,7 +668,7 @@ func promptPassword(title string) (string, error) {
 		return "", fmt.Errorf("password required: use --password-stdin or run in a TTY")
 	}
 	var pw string
-	err := huh.NewInput().
+	err := runHuh(huh.NewInput().
 		Title(title).
 		EchoMode(huh.EchoModePassword).
 		Value(&pw).
@@ -616,8 +677,7 @@ func promptPassword(title string) (string, error) {
 				return errors.New("Password is required")
 			}
 			return nil
-		}).
-		Run()
+		}))
 	if err != nil {
 		return "", err
 	}
@@ -629,12 +689,11 @@ func promptConfirm(title string) error {
 		return fmt.Errorf("refusing without -y (non-interactive)")
 	}
 	var ok bool
-	if err := huh.NewConfirm().
+	if err := runHuh(huh.NewConfirm().
 		Title(title).
 		Affirmative("Yes").
 		Negative("No").
-		Value(&ok).
-		Run(); err != nil {
+		Value(&ok)); err != nil {
 		return err
 	}
 	if !ok {

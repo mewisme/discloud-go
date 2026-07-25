@@ -56,7 +56,7 @@ discloud                                    (--base, --origin, --json, -v/--vers
 │   ├── me
 │   ├── password [current] [new]
 │   └── token
-│       ├── create                          (--name, --scopes, --expires)
+│       ├── create                          (prompt or --name/--scopes/--expires)
 │       ├── list
 │       ├── info|validate|whoami            (--prompt)
 │       └── revoke <id>                     (-y/--yes)
@@ -88,8 +88,9 @@ discloud                                    (--base, --origin, --json, -v/--vers
 ├── config
 │   ├── get
 │   ├── set [token]                         (--base, --origin, --token, --clear-token)
-│   │   └── self-upload                     (--guild-id, --channel-id, --chunk-mb,
-│   │                                        --bot-token, --append-tokens, --clear-tokens, --clear)
+│   │   ├── self-upload                     (--guild-id, --channel-id, --chunk-mb,
+│   │   │                                    --bot-token, --append-tokens, --clear-tokens, --clear)
+│   │   └── customize                       (--upload-colors, --download-colors, --prompt-theme)
 │   ├── unset [base|origin|token]...        (--base, --origin, --token)
 │   └── path
 ├── completion {bash|zsh|fish|powershell}
@@ -185,8 +186,32 @@ discloud config set self-upload \
 discloud config set self-upload --bot-token 'EXTRA' --append-tokens
 discloud config set self-upload --clear-tokens
 discloud config set self-upload --clear
+discloud config set customize                  # select upload/download/both/prompt theme/reset
+discloud config set customize --reset          # both sides → built-in default gradient
+discloud config set customize --reset=upload
+discloud config set customize --reset=download
+discloud config set customize --prompt-theme charm
+discloud config set customize \
+  --upload-colors '#3f51b1,#f18271,#f7c978' \
+  --download-colors '#0000ff,#00ff00'
 ```
 
+Progress bar colors and prompt theme live under `customize` in `config.yaml`. Interactive mode asks what to edit (`upload` / `download` / `both` / **prompt theme** / **reset to default**). Color paths open a **centered** HSL picker with a **live 100% preview**. Choosing **both** runs one picker and applies the same stops + longHue to upload and download. **Prompt theme** opens a live-styled list of huh themes (default **Base 16**); moving the cursor restyles the preview. Use **prev/next** (`[`/`]` or click) between color steps; **`h` / click hex** to type `#RGB`/`#RRGGBB` directly; **`r` / reset** restores the built-in gradient; **`l` / long hue** toggles HSV long-arc blend; Enter applies the current step; Esc saves. Flags take comma-separated `#RGB` / `#RRGGBB`, `--prompt-theme`, or `--reset[=upload|download|both]`. Empty / unset uses the built-in gradient and Base 16 prompts.
+
+```yaml
+customize:
+  promptTheme: base16   # base16 | charm | dracula | catppuccin | default
+  upload:
+    progressbar:
+      colors: ["#3f51b1", "#f18271", "#f7c978"]
+      longHue: true   # HSV long-arc blend between stops (spectrum spin)
+  download:
+    progressbar:
+      colors: ["#0000ff", "#00ff00"]
+      longHue: false
+```
+
+Flags: `--upload-long-hue` / `--download-long-hue` / `--prompt-theme`. In the color picker, toggle **long hue** on the nav row (or press `l`); active = purple label.
 ### Auth
 
 ```bash
@@ -204,6 +229,7 @@ discloud auth password                         # prompts for current + new
 discloud auth password 'old' 'new'             # positional deprecated
 
 # Personal access tokens (scopes: upload|read|manage|admin; admin also needs admin role)
+discloud auth token create                     # interactive: name, scopes, optional expires
 discloud auth token create --name ci --scopes upload,read,manage
 discloud auth token create --name temp --scopes read --expires 2027-01-01T00:00:00Z
 discloud auth token list

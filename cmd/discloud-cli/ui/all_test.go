@@ -2,7 +2,6 @@ package ui
 
 import (
 	"bytes"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +51,7 @@ func TestProgressStatusTransitions(t *testing.T) {
 		{Name: "a.bin", Total: 100},
 		{Name: "b.bin", Total: 100},
 	}
-	m := newProgressModel(files, NewProgressLayout([]string{"a.bin", "b.bin"}), 120, nil, "Uploading")
+	m := newProgressModel(files, NewProgressLayout([]string{"a.bin", "b.bin"}), 120, nil, "Uploading", nil, false)
 	if m.rows[0].status != statusWaiting || m.rows[1].status != statusWaiting {
 		t.Fatal("expected Waiting")
 	}
@@ -106,7 +105,7 @@ func TestProgressViewColumnAlignment(t *testing.T) {
 		files[i] = ProgressFile{Name: n, Total: int64((i + 1) * 1024 * 1024)}
 	}
 	layout := NewProgressLayoutSized(names, 24)
-	m := newProgressModel(files, layout, 140, nil, "Uploading")
+	m := newProgressModel(files, layout, 140, nil, "Uploading", nil, false)
 	_, _ = m.Update(fileProgressMsg{id: 0, sent: 0})
 	_, _ = m.Update(fileProgressMsg{id: 1, sent: files[1].Total / 2})
 	_, _ = m.Update(fileDoneMsg{id: 2})
@@ -148,7 +147,18 @@ func TestUploadProgressWaitSmoke(t *testing.T) {
 	prog.Wait() // idempotent
 }
 
-var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+func TestPrintProgressPreview(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	PrintProgressPreview(&buf, "Upload", []string{"#ff0000", "#00ff00"})
+	s := buf.String()
+	if !strings.Contains(s, "Upload") || !strings.Contains(s, "100%") {
+		t.Fatalf("preview=%q", s)
+	}
+	if !strings.Contains(s, "━") {
+		t.Fatalf("expected filled bar: %q", s)
+	}
+}
 
 // progressColCells returns terminal-cell starts of bar, transferred, %, speed.
 func progressColCells(plain string) (c struct{ bar, cur, pct, spd int }, ok bool) {
@@ -280,6 +290,52 @@ func TestPadRight(t *testing.T) {
 	}
 	if got := padRight("ab", 4); got != "ab  " {
 		t.Fatalf("pad got %q", got)
+	}
+}
+
+func TestBannerContentWidth(t *testing.T) {
+	t.Parallel()
+	if w := BannerContentWidth(); w < 40 {
+		t.Fatalf("banner width %d too small", w)
+	}
+}
+
+func TestTableTargetOuter(t *testing.T) {
+	t.Parallel()
+	bw := BannerContentWidth()
+	if got := tableTargetOuter(bw + 10); got != bw {
+		t.Fatalf("wide term: got %d want banner %d", got, bw)
+	}
+	if got := tableTargetOuter(bw - 5); got != bw-5 {
+		t.Fatalf("narrow term: got %d want %d", got, bw-5)
+	}
+}
+
+func TestTableLeftPadFollowsBanner(t *testing.T) {
+	t.Parallel()
+	bw := BannerContentWidth()
+	termW := bw + 20
+	bLeft, _ := bannerLayout(termW)
+	// Table same width as banner → same left pad.
+	if got := tableLeftPad(termW, bw); got != bLeft {
+		t.Fatalf("same width: left=%d want banner left=%d", got, bLeft)
+	}
+	// Narrower table → centered under banner (more left pad than banner).
+	tw := bw - 10
+	want := bLeft + (bw-tw)/2
+	if got := tableLeftPad(termW, tw); got != want {
+		t.Fatalf("narrow table: left=%d want %d", got, want)
+	}
+}
+
+func TestWrapDisplay(t *testing.T) {
+	t.Parallel()
+	lines := wrapDisplay("abcdefghij", 4)
+	if len(lines) != 3 || lines[0] != "abcd" || lines[1] != "efgh" || lines[2] != "ij" {
+		t.Fatalf("wrap=%q", lines)
+	}
+	if got := wrapDisplay("ab", 4); len(got) != 1 || got[0] != "ab" {
+		t.Fatalf("short=%q", got)
 	}
 }
 

@@ -123,14 +123,13 @@ func resolveUploadMode(mode string) (string, error) {
 	interactive := !flagJSON && ui.IsTTY(os.Stdin)
 	if interactive && su.Configured() {
 		var pick string
-		if err := huh.NewSelect[string]().
+		if err := runHuh(huh.NewSelect[string]().
 			Title("Select upload mode").
 			Options(
 				huh.NewOption("Server upload", "server"),
 				huh.NewOption("Self upload", "self"),
 			).
-			Value(&pick).
-			Run(); err != nil {
+			Value(&pick)); err != nil {
 			return "", err
 		}
 		return pick, nil
@@ -171,7 +170,7 @@ func uploadSelf(jobs []uploadJob, workers int, dataFile string, force, usePasswo
 	}
 	if adj.NeedsUpgrade {
 		var choice string
-		if err := huh.NewSelect[string]().
+		if err := runHuh(huh.NewSelect[string]().
 			Title(fmt.Sprintf("The guild now supports chunks up to %s.\nCurrent chunk size is %s.\nIncrease chunk size?",
 				transfer.FormatChunkMB(adj.MaxChunk), transfer.FormatChunkMB(chunkSize))).
 			Options(
@@ -179,8 +178,7 @@ func uploadSelf(jobs []uploadJob, workers int, dataFile string, force, usePasswo
 				huh.NewOption("Use maximum "+transfer.FormatChunkMB(adj.MaxChunk), "max"),
 				huh.NewOption("Choose another size", "custom"),
 			).
-			Value(&choice).
-			Run(); err != nil {
+			Value(&choice)); err != nil {
 			return err
 		}
 		switch choice {
@@ -188,7 +186,7 @@ func uploadSelf(jobs []uploadJob, workers int, dataFile string, force, usePasswo
 			chunkSize = adj.MaxChunk
 		case "custom":
 			var s string
-			if err := huh.NewInput().Title("Chunk size in MB").Value(&s).Run(); err != nil {
+			if err := runHuh(huh.NewInput().Title("Chunk size in MB").Value(&s)); err != nil {
 				return err
 			}
 			var mb int
@@ -452,7 +450,7 @@ type uploadJob struct {
 func promptBundleOutPath(initial string) (string, error) {
 	out := initial
 	for {
-		if err := huh.NewInput().
+		if err := runHuh(huh.NewInput().
 			Title("Output .discloud path").
 			Value(&out).
 			Validate(func(s string) error {
@@ -460,8 +458,7 @@ func promptBundleOutPath(initial string) (string, error) {
 					return fmt.Errorf("path is required")
 				}
 				return nil
-			}).
-			Run(); err != nil {
+			})); err != nil {
 			return "", err
 		}
 		entered := strings.TrimSpace(out)
@@ -470,12 +467,11 @@ func promptBundleOutPath(initial string) (string, error) {
 			return fixed, nil
 		}
 		var ok bool
-		if err := huh.NewConfirm().
+		if err := runHuh(huh.NewConfirm().
 			Title(fmt.Sprintf("Path updated to %s. Continue?", fixed)).
 			Affirmative("Yes").
 			Negative("No").
-			Value(&ok).
-			Run(); err != nil {
+			Value(&ok)); err != nil {
 			return "", err
 		}
 		if ok {
@@ -512,7 +508,7 @@ func promptUploadPaths() ([]string, error) {
 	for {
 		var v string
 		n := len(paths) + 1
-		err := huh.NewInput().
+		err := runHuh(huh.NewInput().
 			Title(fmt.Sprintf("Path #%d", n)).
 			Description("Enter a file or folder path (comma-separated ok). Empty twice to start upload.").
 			Value(&v).
@@ -527,8 +523,7 @@ func promptUploadPaths() ([]string, error) {
 					}
 				}
 				return nil
-			}).
-			Run()
+			}))
 		if err != nil {
 			return nil, err
 		}
@@ -637,9 +632,7 @@ func uploadJobs(c *client.Client, jobs []uploadJob, workers int) error {
 		}
 		item, err := uploadOne(ctx, c, job.path, job.remoteName, workers, bars[i])
 		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", job.remoteName, err)
-			}
+			firstErr = fmt.Errorf("%s: %w", job.remoteName, err)
 			for j := i + 1; j < len(bars); j++ {
 				if bars[j] != nil {
 					bars[j].Abort()

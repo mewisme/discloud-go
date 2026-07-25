@@ -18,14 +18,13 @@ func promptUploadPickMode() (string, error) {
 		return "", fmt.Errorf("upload pick requires an interactive TTY")
 	}
 	var mode string
-	if err := huh.NewSelect[string]().
+	if err := runHuh(huh.NewSelect[string]().
 		Title("What do you want to upload?").
 		Options(
 			huh.NewOption("Files", "files"),
 			huh.NewOption("Folder", "folder"),
 		).
-		Value(&mode).
-		Run(); err != nil {
+		Value(&mode)); err != nil {
 		return "", err
 	}
 	return mode, nil

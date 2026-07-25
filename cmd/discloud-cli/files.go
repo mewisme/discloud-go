@@ -562,11 +562,10 @@ func resolveFileID(c *client.Client, id string) (string, error) {
 		opts[i] = huh.NewOption(fmt.Sprintf("%s · %s", f.FileName, f.FileID), f.FileID)
 	}
 	var picked string
-	if err := huh.NewSelect[string]().
+	if err := runHuh(huh.NewSelect[string]().
 		Title("Select file").
 		Options(opts...).
-		Value(&picked).
-		Run(); err != nil {
+		Value(&picked)); err != nil {
 		return "", err
 	}
 	return picked, nil
@@ -594,11 +593,10 @@ func pickFileVisibility(c *client.Client) (id, cur string, err error) {
 		byID[f.FileID] = f.Visibility
 	}
 	var picked string
-	if err := huh.NewSelect[string]().
+	if err := runHuh(huh.NewSelect[string]().
 		Title("Select file").
 		Options(opts...).
-		Value(&picked).
-		Run(); err != nil {
+		Value(&picked)); err != nil {
 		return "", "", err
 	}
 	return picked, byID[picked], nil
@@ -623,14 +621,13 @@ func resolveVisibility(arg, defaultVis string) (string, error) {
 	if vis != "public" && vis != "private" {
 		vis = "private"
 	}
-	if err := huh.NewSelect[string]().
+	if err := runHuh(huh.NewSelect[string]().
 		Title("Visibility").
 		Options(
 			huh.NewOption("public", "public"),
 			huh.NewOption("private", "private"),
 		).
-		Value(&vis).
-		Run(); err != nil {
+		Value(&vis)); err != nil {
 		return "", err
 	}
 	return vis, nil

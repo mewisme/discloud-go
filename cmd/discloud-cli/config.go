@@ -85,10 +85,10 @@ func newConfigSetCmd() *cobra.Command {
 				}
 				base = cfg.BaseURL
 				origin = cfg.Origin
-				if err := huh.NewInput().Title("Base").Value(&base).Run(); err != nil {
+				if err := runHuh(huh.NewInput().Title("Base").Value(&base)); err != nil {
 					return err
 				}
-				if err := huh.NewInput().Title("Origin").Value(&origin).Run(); err != nil {
+				if err := runHuh(huh.NewInput().Title("Origin").Value(&origin)); err != nil {
 					return err
 				}
 			} else {
@@ -120,12 +120,11 @@ func newConfigSetCmd() *cobra.Command {
 			interactive := !flagJSON && ui.IsTTY(os.Stdin)
 			if interactive {
 				var wantSelf bool
-				if err := huh.NewConfirm().
+				if err := runHuh(huh.NewConfirm().
 					Title("Configure self-upload?").
 					Affirmative("Yes").
 					Negative("No").
-					Value(&wantSelf).
-					Run(); err != nil {
+					Value(&wantSelf)); err != nil {
 					return err
 				}
 				if wantSelf {
@@ -151,14 +150,14 @@ func newConfigSetCmd() *cobra.Command {
 				}
 				return writeJSON(out)
 			}
-			return runConfigShow(cmd, nil)
+			return printClientConfigAfterSet(client.DefaultConfig(), mustLoadSelfUpload())
 		}),
 	}
 	cmd.Flags().StringVar(&base, "base", "", "API origin to save")
 	cmd.Flags().StringVar(&origin, "origin", "", "DISCLOUD_CORS origin to save")
 	cmd.Flags().BoolVar(&setToken, "token", false, "Prompt for personal access token (value not passed on the CLI)")
 	cmd.Flags().BoolVar(&clearToken, "clear-token", false, "Remove stored token (prefer: config unset token)")
-	cmd.AddCommand(newConfigSetSelfUploadCmd())
+	cmd.AddCommand(newConfigSetSelfUploadCmd(), newConfigSetCustomizeCmd())
 	return cmd
 }
 
@@ -216,7 +215,7 @@ func newConfigUnsetCmd() *cobra.Command {
 					"token":   maskAPIToken(cfg.Token),
 				})
 			}
-			return printClientConfig(client.DefaultConfig(), mustLoadSelfUpload())
+			return printClientConfigAfterSet(client.DefaultConfig(), mustLoadSelfUpload())
 		}),
 	}
 	cmd.Flags().BoolVar(&clearBase, "base", false, "Clear stored base")
@@ -246,7 +245,6 @@ func newConfigSetSelfUploadCmd() *cobra.Command {
 				if flagJSON {
 					return writeJSON(map[string]string{"cleared": "selfUpload", "path": client.ConfigFilePath()})
 				}
-				ui.PrintSuccess("Cleared self-upload config")
 				return printClientConfig(client.DefaultConfig(), client.SelfUploadConfig{})
 			}
 			cur, err := client.LoadSelfUpload()
@@ -317,7 +315,7 @@ func newConfigSetSelfUploadCmd() *cobra.Command {
 					"chunkSize":     su.ChunkSize,
 				})
 			}
-			return printClientConfig(client.DefaultConfig(), su)
+			return printClientConfigAfterSet(client.DefaultConfig(), su)
 		}),
 	}
 	cmd.Flags().StringVar(&guildID, "guild-id", "", "Discord guild ID")
@@ -338,10 +336,10 @@ func promptAndSaveSelfUpload(cur client.SelfUploadConfig) error {
 		chunkMB = transfer.BytesToMB(cur.ChunkSize)
 	}
 
-	if err := huh.NewInput().Title("Discord guild ID").Value(&guildID).Run(); err != nil {
+	if err := runHuh(huh.NewInput().Title("Discord guild ID").Value(&guildID)); err != nil {
 		return err
 	}
-	if err := huh.NewInput().Title("Discord channel ID").Value(&channelID).Run(); err != nil {
+	if err := runHuh(huh.NewInput().Title("Discord channel ID").Value(&channelID)); err != nil {
 		return err
 	}
 	tokens := cur.BotTokens
@@ -358,7 +356,7 @@ func promptAndSaveSelfUpload(cur client.SelfUploadConfig) error {
 		chunkMB = 10
 	}
 	var s string
-	if err := huh.NewInput().Title("Preferred chunk size in MB").Value(&s).Placeholder(strconv.Itoa(chunkMB)).Run(); err != nil {
+	if err := runHuh(huh.NewInput().Title("Preferred chunk size in MB").Value(&s).Placeholder(strconv.Itoa(chunkMB))); err != nil {
 		return err
 	}
 	if strings.TrimSpace(s) != "" {
@@ -393,7 +391,7 @@ func promptAndSaveSelfUpload(cur client.SelfUploadConfig) error {
 			"chunkSize":     su.ChunkSize,
 		})
 	}
-	return printClientConfig(client.DefaultConfig(), su)
+	return printClientConfigAfterSet(client.DefaultConfig(), su)
 }
 
 // promptBotTokens collects tokens. Comma-separated values count as multiple tokens
@@ -404,12 +402,11 @@ func promptBotTokens() ([]string, error) {
 	for {
 		var tok string
 		n := len(tokens) + 1
-		err := huh.NewInput().
+		err := runHuh(huh.NewInput().
 			Title(fmt.Sprintf("Discord bot token #%d", n)).
 			Description("Paste one token, or several separated by commas. Empty twice to continue.").
 			EchoMode(huh.EchoModePassword).
-			Value(&tok).
-			Run()
+			Value(&tok))
 		if err != nil {
 			return nil, err
 		}
@@ -451,6 +448,281 @@ func splitCommaFields(s string) []string {
 	return out
 }
 
+func newConfigSetCustomizeCmd() *cobra.Command {
+	var uploadColors, downloadColors, promptTheme string
+	var resetScope string
+	var uploadLongHue, downloadLongHue bool
+	cmd := &cobra.Command{
+		Use:   "customize",
+		Short: "Configure progress bar colors and prompt theme",
+		Args:  cobra.NoArgs,
+		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			cur, err := client.LoadCustomize()
+			if err != nil {
+				return err
+			}
+			upFlag := cmd.Flags().Changed("upload-colors")
+			downFlag := cmd.Flags().Changed("download-colors")
+			upLongFlag := cmd.Flags().Changed("upload-long-hue")
+			downLongFlag := cmd.Flags().Changed("download-long-hue")
+			themeFlag := cmd.Flags().Changed("prompt-theme")
+			resetFlag := cmd.Flags().Changed("reset")
+
+			if resetFlag {
+				if err := applyCustomizeReset(&cur, resetScope); err != nil {
+					return err
+				}
+				if err := client.SaveCustomize(&cur); err != nil {
+					return err
+				}
+				if flagJSON {
+					return writeCustomizeJSON(cur)
+				}
+				return printClientConfigAfterSet(client.DefaultConfig(), mustLoadSelfUpload())
+			}
+
+			if upFlag || downFlag || upLongFlag || downLongFlag || themeFlag {
+				if themeFlag {
+					theme, err := client.NormalizePromptTheme(promptTheme)
+					if err != nil {
+						return err
+					}
+					cur.PromptTheme = theme
+				}
+				if upFlag {
+					colors, err := parseColorFlag(uploadColors)
+					if err != nil {
+						return fmt.Errorf("upload-colors: %w", err)
+					}
+					longHue := uploadLongHue
+					if !upLongFlag {
+						_, longHue = cur.ProgressBarSettings("upload")
+					}
+					cur.Upload = &client.TransferUIConfig{
+						ProgressBar: client.ProgressBarConfig{Colors: colors, LongHue: longHue},
+					}
+				} else if upLongFlag {
+					colors := cur.ProgressColors("upload")
+					cur.Upload = &client.TransferUIConfig{
+						ProgressBar: client.ProgressBarConfig{Colors: colors, LongHue: uploadLongHue},
+					}
+				}
+				if downFlag {
+					colors, err := parseColorFlag(downloadColors)
+					if err != nil {
+						return fmt.Errorf("download-colors: %w", err)
+					}
+					longHue := downloadLongHue
+					if !downLongFlag {
+						_, longHue = cur.ProgressBarSettings("download")
+					}
+					cur.Download = &client.TransferUIConfig{
+						ProgressBar: client.ProgressBarConfig{Colors: colors, LongHue: longHue},
+					}
+				} else if downLongFlag {
+					colors := cur.ProgressColors("download")
+					cur.Download = &client.TransferUIConfig{
+						ProgressBar: client.ProgressBarConfig{Colors: colors, LongHue: downloadLongHue},
+					}
+				}
+				if err := client.SaveCustomize(&cur); err != nil {
+					return err
+				}
+				if flagJSON {
+					return writeCustomizeJSON(cur)
+				}
+				return printClientConfigAfterSet(client.DefaultConfig(), mustLoadSelfUpload())
+			}
+
+			if flagJSON {
+				return fmt.Errorf("pass --upload-colors, --download-colors, --upload-long-hue, --download-long-hue, --prompt-theme, and/or --reset with --json")
+			}
+			if !ui.IsTTY(os.Stdin) {
+				return fmt.Errorf("pass flags or run in a TTY for interactive customize")
+			}
+
+			if err := promptAndSaveCustomize(cur); err != nil {
+				return err
+			}
+			return printClientConfigAfterSet(client.DefaultConfig(), mustLoadSelfUpload())
+		}),
+	}
+	cmd.Flags().StringVar(&uploadColors, "upload-colors", "", "Comma-separated hex colors for upload progress bar")
+	cmd.Flags().StringVar(&downloadColors, "download-colors", "", "Comma-separated hex colors for download progress bar")
+	cmd.Flags().BoolVar(&uploadLongHue, "upload-long-hue", false, "HSV long-arc blend between upload color stops")
+	cmd.Flags().BoolVar(&downloadLongHue, "download-long-hue", false, "HSV long-arc blend between download color stops")
+	cmd.Flags().StringVar(&promptTheme, "prompt-theme", "", "Huh prompt theme: base16, charm, dracula, catppuccin, default")
+	cmd.Flags().StringVar(&resetScope, "reset", "", "Reset to default gradient: upload, download, or both")
+	if f := cmd.Flags().Lookup("reset"); f != nil {
+		f.NoOptDefVal = "both"
+	}
+	return cmd
+}
+
+func applyCustomizeReset(cur *client.CustomizeConfig, scope string) error {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "", "both", "all":
+		cur.Upload = nil
+		cur.Download = nil
+	case "upload":
+		cur.Upload = nil
+	case "download":
+		cur.Download = nil
+	default:
+		return fmt.Errorf("reset: want upload, download, or both (got %q)", scope)
+	}
+	return nil
+}
+
+// promptAndSaveCustomize walks customize → upload|download|prompt theme → picker.
+func promptAndSaveCustomize(cur client.CustomizeConfig) error {
+	var side string
+	if err := runHuh(huh.NewSelect[string]().
+		Title("customize").
+		Description("What to configure?").
+		Options(
+			huh.NewOption("upload", "upload"),
+			huh.NewOption("download", "download"),
+			huh.NewOption("both (upload + download)", "both"),
+			huh.NewOption("prompt theme", "theme"),
+			huh.NewOption("reset to default", "reset"),
+		).
+		Value(&side)); err != nil {
+		return err
+	}
+
+	if side == "theme" {
+		theme, err := promptPromptTheme(cur.PromptTheme)
+		if err != nil {
+			return err
+		}
+		cur.PromptTheme = theme
+		return client.SaveCustomize(&cur)
+	}
+
+	if side == "reset" {
+		var scope string
+		if err := runHuh(huh.NewSelect[string]().
+			Title("customize.reset").
+			Description("Clear stored colors (built-in gradient used until you set new ones).").
+			Options(
+				huh.NewOption("upload", "upload"),
+				huh.NewOption("download", "download"),
+				huh.NewOption("both", "both"),
+			).
+			Value(&scope)); err != nil {
+			return err
+		}
+		if err := applyCustomizeReset(&cur, scope); err != nil {
+			return err
+		}
+		if err := client.SaveCustomize(&cur); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	seedSide := side
+	if side == "both" {
+		seedSide = "upload"
+	}
+	ui.PrintInfo("customize.%s.progressbar.colors", side)
+	curColors, curLong := cur.ProgressBarSettings(seedSide)
+	if side == "both" && len(curColors) == 0 {
+		curColors, curLong = cur.ProgressBarSettings("download")
+	}
+	colors, longHue, err := promptProgressColors(side, curColors, curLong)
+	if err != nil {
+		return err
+	}
+	block := client.ProgressBarConfig{Colors: colors, LongHue: longHue}
+	switch side {
+	case "upload":
+		cur.Upload = &client.TransferUIConfig{ProgressBar: block}
+	case "download":
+		cur.Download = &client.TransferUIConfig{ProgressBar: block}
+	case "both":
+		cur.Upload = &client.TransferUIConfig{ProgressBar: block}
+		cur.Download = &client.TransferUIConfig{ProgressBar: client.ProgressBarConfig{
+			Colors:  append([]string(nil), colors...),
+			LongHue: longHue,
+		}}
+	}
+
+	return client.SaveCustomize(&cur)
+}
+
+func parseColorFlag(s string) ([]string, error) {
+	parts := splitCommaFields(s)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("at least one color required")
+	}
+	return client.NormalizeHexColors(parts)
+}
+
+func promptProgressColors(label string, current []string, curLongHue bool) (colors []string, longHue bool, err error) {
+	title := label
+	if label != "" {
+		title = strings.ToUpper(label[:1]) + label[1:]
+	}
+	show := current
+	if len(show) == 0 {
+		show = ui.DefaultProgressColors()
+	}
+	ui.PrintProgressPreviewOpts(os.Stderr, title+" (current)", show, curLongHue)
+
+	defSteps := len(show)
+	if defSteps < minGradSteps {
+		defSteps = len(ui.DefaultProgressColors())
+	}
+	var raw string
+	if err := runHuh(huh.NewInput().
+		Title("Gradient steps").
+		Description(fmt.Sprintf("How many color stops? (%d–%d)", minGradSteps, maxGradSteps)).
+		Placeholder(strconv.Itoa(defSteps)).
+		Value(&raw)); err != nil {
+		return nil, false, err
+	}
+	n := defSteps
+	if s := strings.TrimSpace(raw); s != "" {
+		parsed, err := strconv.Atoi(s)
+		if err != nil || parsed < minGradSteps || parsed > maxGradSteps {
+			return nil, false, fmt.Errorf("gradient steps must be %d–%d", minGradSteps, maxGradSteps)
+		}
+		n = parsed
+	}
+
+	seed := seedGradientSteps(n, current)
+	colors, longHue, canceled, err := promptHexColors(title, seed, curLongHue)
+	if err != nil {
+		return nil, false, err
+	}
+	if canceled {
+		return nil, false, fmt.Errorf("%s colors canceled", label)
+	}
+	if len(colors) == 0 {
+		return nil, false, fmt.Errorf("%s requires at least one color", label)
+	}
+	return colors, longHue, nil
+}
+
+func writeCustomizeJSON(c client.CustomizeConfig) error {
+	up, upLH := c.ProgressBarSettings("upload")
+	down, downLH := c.ProgressBarSettings("download")
+	return writeJSON(map[string]any{
+		"path": client.ConfigFilePath(),
+		"customize": map[string]any{
+			"promptTheme": c.PromptThemeOrDefault(),
+			"upload": map[string]any{
+				"progressbar": map[string]any{"colors": up, "longHue": upLH},
+			},
+			"download": map[string]any{
+				"progressbar": map[string]any{"colors": down, "longHue": downLH},
+			},
+		},
+	})
+}
+
 func runConfigShow(cmd *cobra.Command, args []string) error {
 	_ = client.EnsureConfigMigrated()
 	c, err := apiClient()
@@ -459,6 +731,9 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	}
 	cfg := c.Config()
 	su, _ := client.LoadSelfUpload()
+	cust, _ := client.LoadCustomize()
+	upCols, upLH := cust.ProgressBarSettings("upload")
+	downCols, downLH := cust.ProgressBarSettings("download")
 	if flagJSON {
 		return writeJSON(map[string]any{
 			"base":    cfg.BaseURL,
@@ -473,6 +748,15 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 				"channelId":     su.ChannelID,
 				"premiumTier":   su.PremiumTier,
 				"chunkSize":     su.ChunkSize,
+			},
+			"customize": map[string]any{
+				"promptTheme": cust.PromptThemeOrDefault(),
+				"upload": map[string]any{
+					"progressbar": map[string]any{"colors": upCols, "longHue": upLH},
+				},
+				"download": map[string]any{
+					"progressbar": map[string]any{"colors": downCols, "longHue": downLH},
+				},
 			},
 		})
 	}
@@ -539,11 +823,47 @@ func orDash(s string) string {
 	return s
 }
 
-// printClientConfig renders Config + Self-upload as one admin-overview-style table.
+// printClientConfigAfterSet shows the config table (clear + banner + centered).
+func printClientConfigAfterSet(cfg client.Config, su client.SelfUploadConfig) error {
+	return printClientConfig(cfg, su)
+}
+
+// printClientConfig renders Config + Self-upload + Customize as KV blocks.
 func printClientConfig(cfg client.Config, su client.SelfUploadConfig) error {
 	blocks := []ui.KVBlock{configKVBlock(cfg)}
 	if su.Configured() || len(su.BotTokens) > 0 || su.ChannelID != "" || su.GuildID != "" {
 		blocks = append(blocks, selfUploadKVBlock(su))
 	}
+	cust, _ := client.LoadCustomize()
+	blocks = append(blocks, customizeKVBlock(cust, 0))
+	barW := ui.KVBlocksValueWidth(os.Stdout, blocks)
+	blocks[len(blocks)-1] = customizeKVBlock(cust, barW)
 	return ui.PrintKVBlocks(os.Stdout, blocks)
+}
+
+func customizeKVBlock(c client.CustomizeConfig, barWidth int) ui.KVBlock {
+	up, upLH := c.ProgressBarSettings("upload")
+	down, downLH := c.ProgressBarSettings("download")
+	upPrev, downPrev := "", ""
+	if barWidth > 0 {
+		upPrev = ui.ProgressBarPreview(up, upLH, barWidth)
+		downPrev = ui.ProgressBarPreview(down, downLH, barWidth)
+	}
+	return ui.KVBlock{
+		Title: "Customize",
+		Rows: [][]string{
+			{"prompt theme", promptThemeLabel(c.PromptThemeOrDefault())},
+			{"upload progressbar", upPrev},
+			{"upload longHue", formatBool(upLH)},
+			{"download progressbar", downPrev},
+			{"download longHue", formatBool(downLH)},
+		},
+	}
+}
+
+func formatBool(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
 }

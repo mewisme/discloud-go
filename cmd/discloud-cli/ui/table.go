@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mewisme/discloud-go/internal/client"
 	"golang.org/x/term"
@@ -52,13 +53,15 @@ type KVBlock struct {
 	Rows  [][]string
 }
 
-// printTable draws a content-sized ASCII table with dim +-| borders.
+// printTable draws a content-sized ASCII table with dim +-| borders, centered.
+// On stdout (non-JSON), clears the screen and reprints the banner first (hidden if term < banner).
 // rightAlign marks numeric columns; shrinkPrefer is the order to shrink when
-// the table is wider than the terminal (defaults to last column).
+// the table is wider than the terminal (defaults to last column). Cells wrap.
 func printTable(w io.Writer, headers []string, rows [][]string, rightAlign []bool, shrinkPrefer ...int) error {
 	if len(headers) == 0 {
 		return nil
 	}
+	prepareTableView(w)
 	on := false
 	if f, ok := w.(*os.File); ok {
 		on = ColorOn(f)
@@ -68,16 +71,20 @@ func printTable(w io.Writer, headers []string, rows [][]string, rightAlign []boo
 	if len(prefer) == 0 {
 		prefer = []int{len(headers) - 1}
 	}
-	fitWidths(widths, termWidth(w), prefer...)
+	growCol := prefer[0]
+	layoutTableWidths(widths, termWidth(w), growCol, prefer...)
 
+	left := tableCenterPad(w, tableOuterWidth(widths))
 	rule := Dim(on, tableRule(widths))
-	fmt.Fprintln(w, rule)
-	fmt.Fprintln(w, tableRow(paintRow(headers, widths, rightAlign, on, true), on))
-	fmt.Fprintln(w, rule)
+	var lines []string
+	lines = append(lines, rule)
+	lines = appendWrappedRow(lines, headers, widths, rightAlign, on, true)
+	lines = append(lines, rule)
 	for _, row := range rows {
-		fmt.Fprintln(w, tableRow(paintRow(row, widths, rightAlign, on, false), on))
+		lines = appendWrappedRow(lines, row, widths, rightAlign, on, false)
 	}
-	fmt.Fprintln(w, rule)
+	lines = append(lines, rule)
+	writeCentered(w, left, lines...)
 	return nil
 }
 
@@ -92,6 +99,7 @@ func PrintGlyphTable(w io.Writer, rows [][]string) error {
 	if len(rows) == 0 {
 		return nil
 	}
+	prepareTableView(w)
 	on := false
 	if f, ok := w.(*os.File); ok {
 		on = ColorOn(f)
@@ -99,32 +107,24 @@ func PrintGlyphTable(w io.Writer, rows [][]string) error {
 	headers := []string{"", "FIELD", "VALUE"}
 	widths := contentWidths(headers, rows)
 	glyphW := widths[0]
-	fitWidths(widths, termWidth(w), 2)
+	layoutTableWidths(widths, termWidth(w), 2, 2)
 	widths[0] = glyphW // emoji are display-width 2; never shrink glyph col
-
-	rule := Dim(on, tableRule(widths))
-	fmt.Fprintln(w, rule)
-	fmt.Fprintln(w, tableRow(paintRow(headers, widths, nil, on, true), on))
-	fmt.Fprintln(w, rule)
-	for _, row := range rows {
-		glyph, field, value := "", "", ""
-		if len(row) > 0 {
-			glyph = row[0]
-		}
-		if len(row) > 1 {
-			field = row[1]
-		}
-		if len(row) > 2 {
-			value = row[2]
-		}
-		cells := []string{
-			paintGlyph(on, padRight(glyph, widths[0])),
-			Dim(on, padRight(field, widths[1])),
-			paintTyped(on, padRight(value, widths[2]), value, ansiCyan),
-		}
-		fmt.Fprintln(w, tableRow(cells, on))
+	if tableOuterWidth(widths) > termWidth(w) && termWidth(w) > 0 {
+		fitWidths(widths, termWidth(w), 2)
+		widths[0] = glyphW
 	}
-	fmt.Fprintln(w, rule)
+
+	left := tableCenterPad(w, tableOuterWidth(widths))
+	rule := Dim(on, tableRule(widths))
+	var lines []string
+	lines = append(lines, rule)
+	lines = appendGlyphWrappedRow(lines, headers, widths, on, true)
+	lines = append(lines, rule)
+	for _, row := range rows {
+		lines = appendGlyphWrappedRow(lines, row, widths, on, false)
+	}
+	lines = append(lines, rule)
+	writeCentered(w, left, lines...)
 	return nil
 }
 
@@ -143,11 +143,14 @@ func paintGlyph(on bool, padded string) string {
 	}
 }
 
-// PrintKVBlocks draws one table with full-width section title blocks.
+// PrintKVBlocks draws one table with full-width section title blocks, centered.
+// On stdout (non-JSON), clears and shows the banner when the terminal is wide enough.
+// Table min width matches the banner; on narrow terminals the banner is hidden and cells wrap.
 func PrintKVBlocks(w io.Writer, blocks []KVBlock) error {
 	if len(blocks) == 0 {
 		return nil
 	}
+	prepareTableView(w)
 	on := false
 	if f, ok := w.(*os.File); ok {
 		on = ColorOn(f)
@@ -159,27 +162,122 @@ func PrintKVBlocks(w io.Writer, blocks []KVBlock) error {
 		all = append(all, []string{b.Title, ""})
 	}
 	widths := contentWidths(headers, all)
-	fitWidths(widths, termWidth(w), 1)
+	layoutTableWidths(widths, termWidth(w), 1, 1)
 
-	// Only the table's top border is solid (no middle +); everything else uses columns.
+	var lines []string
 	spanRule := Dim(on, tableSpanRule(widths))
 	colRule := Dim(on, tableRule(widths))
 	for i, b := range blocks {
 		if i == 0 {
-			fmt.Fprintln(w, spanRule)
+			lines = append(lines, spanRule)
 		} else {
-			fmt.Fprintln(w, colRule)
+			lines = append(lines, colRule)
 		}
-		fmt.Fprintln(w, tableSpanRow(b.Title, widths, on))
-		fmt.Fprintln(w, colRule)
+		lines = append(lines, tableSpanRow(b.Title, widths, on))
+		lines = append(lines, colRule)
 		for _, row := range b.Rows {
-			fmt.Fprintln(w, tableRow(paintRow(row, widths, nil, on, false), on))
+			lines = appendWrappedRow(lines, row, widths, nil, on, false)
 		}
 		if i == len(blocks)-1 {
-			fmt.Fprintln(w, colRule)
+			lines = append(lines, colRule)
 		}
 	}
+	writeCentered(w, tableCenterPad(w, tableOuterWidth(widths)), lines...)
 	return nil
+}
+
+// prepareTableView clears the TTY; shows the banner only when term width >= banner art.
+func prepareTableView(w io.Writer) {
+	if JSON {
+		return
+	}
+	f, ok := w.(*os.File)
+	if !ok || f != os.Stdout {
+		return
+	}
+	clearScreen()
+	tw := termWidth(w)
+	if tw >= BannerContentWidth() {
+		fmt.Fprint(os.Stderr, FormatBanner(tw))
+	}
+}
+
+func tableCenterPad(w io.Writer, contentW int) string {
+	return strings.Repeat(" ", tableLeftPad(termWidth(w), contentW))
+}
+
+// tableLeftPad centers contentW under the banner (same axis as bannerLayout).
+// When the terminal is too narrow for the banner, centers in the terminal instead.
+func tableLeftPad(termW, contentW int) int {
+	if termW < 1 {
+		return 0
+	}
+	bw := BannerContentWidth()
+	if termW < bw {
+		return centerPad(contentW, termW)
+	}
+	bLeft, bW := bannerLayout(termW)
+	// Center of banner → left edge of table.
+	left := bLeft + (bW-contentW)/2
+	if left < 0 {
+		left = 0
+	}
+	// Keep table inside the terminal when it is wider than the banner.
+	if left+contentW > termW {
+		left = centerPad(contentW, termW)
+	}
+	return left
+}
+
+func writeCentered(w io.Writer, left string, lines ...string) {
+	for _, line := range lines {
+		fmt.Fprintln(w, left+line)
+	}
+}
+
+// centerPad is left spaces to center contentW in termW.
+func centerPad(contentW, termW int) int {
+	if termW < 1 || contentW >= termW {
+		return 0
+	}
+	return (termW - contentW) / 2
+}
+
+// tableOuterWidth is the bordered table width for column widths.
+func tableOuterWidth(widths []int) int {
+	n := 3*len(widths) + 1
+	for _, w := range widths {
+		n += w
+	}
+	return n
+}
+
+// tableTargetOuter is min table width: banner width, or terminal width when narrower than the banner.
+func tableTargetOuter(termW int) int {
+	bw := BannerContentWidth()
+	if termW > 0 && termW < bw {
+		return termW
+	}
+	return bw
+}
+
+// layoutTableWidths grows the table to at least the banner (or term) width, then fits to term.
+func layoutTableWidths(widths []int, termW, growCol int, prefer ...int) {
+	growColToMinOuter(widths, growCol, tableTargetOuter(termW))
+	if termW > 0 {
+		fitWidths(widths, termW, prefer...)
+	}
+}
+
+func growColToMinOuter(widths []int, col, minOuter int) {
+	if col < 0 || col >= len(widths) || minOuter < 1 {
+		return
+	}
+	cur := tableOuterWidth(widths)
+	if cur >= minOuter {
+		return
+	}
+	widths[col] += minOuter - cur
 }
 
 // tableSpanRow is a full-width section label with no middle | divider.
@@ -346,10 +444,10 @@ func contentWidths(headers []string, rows [][]string) []int {
 	return widths
 }
 
-// displayWidth is terminal cell count. Non-BMP (emoji) = 2; ASCII/BMP = 1.
+// displayWidth is terminal cell count (ANSI escapes ignored). Non-BMP (emoji) = 2; ASCII/BMP = 1.
 func displayWidth(s string) int {
 	n := 0
-	for _, r := range s {
+	for _, r := range stripANSI(s) {
 		n += runeWidth(r)
 	}
 	return n
@@ -409,6 +507,182 @@ func fitWidths(widths []int, termW int, prefer ...int) {
 	}
 }
 
+// KVBlocksValueWidth returns the value-column width for progress previews.
+// Pass draft rows (empty progress previews) so bars do not inflate the measure.
+func KVBlocksValueWidth(w io.Writer, blocks []KVBlock) int {
+	if len(blocks) == 0 {
+		return 8
+	}
+	headers := []string{"", ""}
+	var all [][]string
+	for _, b := range blocks {
+		all = append(all, b.Rows...)
+		all = append(all, []string{b.Title, ""})
+	}
+	widths := contentWidths(headers, all)
+	layoutTableWidths(widths, termWidth(w), 1, 1)
+	if widths[1] < 8 {
+		return 8
+	}
+	return widths[1]
+}
+
+// wrapDisplay splits s into lines of at most width terminal cells (ANSI stripped when wrapping).
+func wrapDisplay(s string, width int) []string {
+	if width < 1 {
+		return []string{""}
+	}
+	if displayWidth(s) <= width {
+		return []string{s}
+	}
+	plain := stripANSI(s)
+	var lines []string
+	var cur strings.Builder
+	curW := 0
+	for _, r := range plain {
+		rw := runeWidth(r)
+		if rw <= 0 {
+			continue
+		}
+		if curW+rw > width && curW > 0 {
+			lines = append(lines, cur.String())
+			cur.Reset()
+			curW = 0
+		}
+		if rw > width {
+			if curW > 0 {
+				lines = append(lines, cur.String())
+				cur.Reset()
+				curW = 0
+			}
+			lines = append(lines, string(r))
+			continue
+		}
+		cur.WriteRune(r)
+		curW += rw
+	}
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func padExact(s string, width int, right bool) string {
+	dw := displayWidth(s)
+	if dw >= width {
+		return s
+	}
+	pad := strings.Repeat(" ", width-dw)
+	if right {
+		return pad + s
+	}
+	return s + pad
+}
+
+func appendWrappedRow(dst []string, cells []string, widths []int, rightAlign []bool, on, header bool) []string {
+	ncols := len(widths)
+	wrapped := make([][]string, len(cells))
+	maxL := 1
+	for i, c := range cells {
+		w := 0
+		if i < len(widths) {
+			w = widths[i]
+		}
+		parts := wrapDisplay(c, w)
+		painted := make([]string, len(parts))
+		alignRight := rightAlign != nil && i < len(rightAlign) && rightAlign[i]
+		for j, part := range parts {
+			plain := padExact(part, w, alignRight)
+			switch {
+			case header:
+				painted[j] = Bold(on, plain)
+			case ncols == 2 && i == 0:
+				painted[j] = Dim(on, plain)
+			case ncols == 2 && i == 1:
+				if strings.Contains(part, "\x1b") {
+					painted[j] = plain
+				} else {
+					painted[j] = paintTyped(on, plain, part, ansiCyan)
+				}
+			case i == 0:
+				painted[j] = paintTyped(on, plain, part, ansiCyan)
+			default:
+				painted[j] = paintTyped(on, plain, part, "")
+			}
+		}
+		wrapped[i] = painted
+		if len(painted) > maxL {
+			maxL = len(painted)
+		}
+	}
+	for j := 0; j < maxL; j++ {
+		row := make([]string, len(widths))
+		for i := range row {
+			w := widths[i]
+			if i < len(wrapped) && j < len(wrapped[i]) {
+				row[i] = wrapped[i][j]
+			} else {
+				row[i] = strings.Repeat(" ", w)
+			}
+		}
+		dst = append(dst, tableRow(row, on))
+	}
+	return dst
+}
+
+func appendGlyphWrappedRow(dst []string, cells []string, widths []int, on, header bool) []string {
+	glyph, field, value := "", "", ""
+	if len(cells) > 0 {
+		glyph = cells[0]
+	}
+	if len(cells) > 1 {
+		field = cells[1]
+	}
+	if len(cells) > 2 {
+		value = cells[2]
+	}
+	gParts := wrapDisplay(glyph, widths[0])
+	fParts := wrapDisplay(field, widths[1])
+	vParts := wrapDisplay(value, widths[2])
+	maxL := len(gParts)
+	if len(fParts) > maxL {
+		maxL = len(fParts)
+	}
+	if len(vParts) > maxL {
+		maxL = len(vParts)
+	}
+	for j := 0; j < maxL; j++ {
+		g, f, v := "", "", ""
+		if j < len(gParts) {
+			g = gParts[j]
+		}
+		if j < len(fParts) {
+			f = fParts[j]
+		}
+		if j < len(vParts) {
+			v = vParts[j]
+		}
+		gp := padExact(g, widths[0], false)
+		fp := padExact(f, widths[1], false)
+		vp := padExact(v, widths[2], false)
+		var row []string
+		if header {
+			row = []string{Bold(on, gp), Bold(on, fp), Bold(on, vp)}
+		} else {
+			row = []string{
+				paintGlyph(on, gp),
+				Dim(on, fp),
+				paintTyped(on, vp, v, ansiCyan),
+			}
+		}
+		dst = append(dst, tableRow(row, on))
+	}
+	return dst
+}
+
 func paintRow(cells []string, widths []int, rightAlign []bool, on, header bool) []string {
 	out := make([]string, len(cells))
 	ncols := len(widths)
@@ -430,10 +704,12 @@ func paintRow(cells []string, widths []int, rightAlign []bool, on, header bool) 
 		case ncols == 2 && i == 0:
 			out[i] = Dim(on, plain)
 		case ncols == 2 && i == 1:
-			// KV values: typed color; plain strings stay cyan.
-			out[i] = paintTyped(on, plain, c, ansiCyan)
+			if strings.Contains(c, "\x1b") {
+				out[i] = plain
+			} else {
+				out[i] = paintTyped(on, plain, c, ansiCyan)
+			}
 		case i == 0:
-			// First column (usually IDs): typed color; ids/strings cyan.
 			out[i] = paintTyped(on, plain, c, ansiCyan)
 		default:
 			out[i] = paintTyped(on, plain, c, "")
@@ -600,20 +876,45 @@ func truncateDisplay(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	if displayWidth(s) <= width {
+		return s
+	}
 	if width == 1 {
 		return "…"
 	}
 	var b strings.Builder
-	w := 0
-	for _, r := range s {
+	vis := 0
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' {
+			j := i + 1
+			if j < len(s) && s[j] == '[' {
+				j++
+				for j < len(s) {
+					c := s[j]
+					j++
+					if c >= '@' && c <= '~' {
+						break
+					}
+				}
+				b.WriteString(s[i:j])
+				i = j
+				continue
+			}
+		}
+		r, sz := utf8.DecodeRuneInString(s[i:])
 		rw := runeWidth(r)
-		if w+rw > width-1 {
+		if vis+rw > width-1 {
 			break
 		}
 		b.WriteRune(r)
-		w += rw
+		vis += rw
+		i += sz
 	}
 	b.WriteRune('…')
+	if strings.Contains(s, "\x1b") {
+		b.WriteString(ansiReset)
+	}
 	out := b.String()
 	if dw := displayWidth(out); dw < width {
 		out += strings.Repeat(" ", width-dw)

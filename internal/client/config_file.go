@@ -51,12 +51,121 @@ func NormalizeBotTokens(tokens []string) []string {
 	return out
 }
 
+// ProgressBarConfig holds progress-bar UI settings.
+type ProgressBarConfig struct {
+	Colors  []string `yaml:"colors,omitempty" json:"colors,omitempty"`
+	LongHue bool     `yaml:"longHue,omitempty" json:"longHue,omitempty"` // HSV long-arc blend between stops
+}
+
+// TransferUIConfig holds per-direction transfer UI settings.
+type TransferUIConfig struct {
+	ProgressBar ProgressBarConfig `yaml:"progressbar" json:"progressbar"`
+}
+
+// DefaultPromptTheme is the huh theme used when customize.promptTheme is unset.
+const DefaultPromptTheme = "base16"
+
+// CustomizeConfig holds CLI UI/UX customization.
+type CustomizeConfig struct {
+	Upload      *TransferUIConfig `yaml:"upload,omitempty" json:"upload,omitempty"`
+	Download    *TransferUIConfig `yaml:"download,omitempty" json:"download,omitempty"`
+	PromptTheme string            `yaml:"promptTheme,omitempty" json:"promptTheme,omitempty"` // base16|charm|dracula|catppuccin|default
+}
+
+// NormalizePromptTheme validates and normalizes a huh prompt theme id.
+// Empty input resolves to DefaultPromptTheme.
+func NormalizePromptTheme(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "", "base16", "base 16", "base-16":
+		return DefaultPromptTheme, nil
+	case "charm", "dracula", "catppuccin", "default":
+		return s, nil
+	default:
+		return "", fmt.Errorf("prompt theme: want base16, charm, dracula, catppuccin, or default (got %q)", s)
+	}
+}
+
+// PromptThemeOrDefault returns the configured prompt theme, or DefaultPromptTheme.
+func (c CustomizeConfig) PromptThemeOrDefault() string {
+	t, err := NormalizePromptTheme(c.PromptTheme)
+	if err != nil {
+		return DefaultPromptTheme
+	}
+	return t
+}
+
+// ProgressBarSettings returns colors + longHue for "upload" or "download".
+// Empty colors means the caller should use its built-in default palette.
+func (c CustomizeConfig) ProgressBarSettings(kind string) (colors []string, longHue bool) {
+	var t *TransferUIConfig
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "upload":
+		t = c.Upload
+	case "download":
+		t = c.Download
+	}
+	if t == nil {
+		return nil, false
+	}
+	out, _ := NormalizeHexColors(t.ProgressBar.Colors)
+	return out, t.ProgressBar.LongHue
+}
+
+// ProgressColors returns normalized hex colors for "upload" or "download".
+// Empty means the caller should use its built-in default palette.
+func (c CustomizeConfig) ProgressColors(kind string) []string {
+	colors, _ := c.ProgressBarSettings(kind)
+	return colors
+}
+
+// NormalizeHexColor trims and validates #RGB / #RRGGBB (case-insensitive).
+func NormalizeHexColor(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("empty color")
+	}
+	if !strings.HasPrefix(s, "#") {
+		s = "#" + s
+	}
+	body := s[1:]
+	switch len(body) {
+	case 3, 6:
+		for _, c := range body {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return "", fmt.Errorf("invalid hex color %q", s)
+			}
+		}
+		return "#" + strings.ToLower(body), nil
+	default:
+		return "", fmt.Errorf("invalid hex color %q (want #RGB or #RRGGBB)", s)
+	}
+}
+
+// NormalizeHexColors validates and normalizes a list; drops empties; rejects bad hex.
+func NormalizeHexColors(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		c, err := NormalizeHexColor(raw)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
 // FileConfig is the on-disk YAML/JSON schema.
 type FileConfig struct {
 	Base       string            `yaml:"base,omitempty" json:"base,omitempty"`
 	Origin     string            `yaml:"origin,omitempty" json:"origin,omitempty"`
 	Token      string            `yaml:"token,omitempty" json:"token,omitempty"`
 	SelfUpload *SelfUploadConfig `yaml:"selfUpload,omitempty" json:"selfUpload,omitempty"`
+	Customize  *CustomizeConfig  `yaml:"customize,omitempty" json:"customize,omitempty"`
 }
 
 // ConfigFilePath is the user config.yaml path (may not exist yet).
@@ -176,6 +285,7 @@ func SaveConfigFileOpts(base, origin, token string, setToken bool) (path, savedB
 		Origin:     firstNonEmpty(strings.TrimRight(strings.TrimSpace(origin), "/"), cur.Origin),
 		Token:      cur.Token,
 		SelfUpload: cur.SelfUpload,
+		Customize:  cur.Customize,
 	}
 	if setToken {
 		f.Token = strings.TrimSpace(token)
@@ -248,6 +358,100 @@ func UpdateSelfUploadTierAndChunk(tier int, chunkSize int64) error {
 	return SaveSelfUpload(&su)
 }
 
+// LoadCustomize returns UI customize config from YAML (may be empty).
+func LoadCustomize() (CustomizeConfig, error) {
+	f, err := LoadFileConfig()
+	if err != nil {
+		return CustomizeConfig{}, err
+	}
+	if f.Customize == nil {
+		return CustomizeConfig{}, nil
+	}
+	return *f.Customize, nil
+}
+
+// SaveCustomize writes or clears the customize section atomically.
+func SaveCustomize(c *CustomizeConfig) error {
+	_ = EnsureConfigMigrated()
+	cur, err := LoadFileConfig()
+	if err != nil {
+		return err
+	}
+	if c == nil {
+		cur.Customize = nil
+		return writeConfigYAML(ConfigFilePath(), cur)
+	}
+	cp := *c
+	if err := validateCustomize(&cp); err != nil {
+		return err
+	}
+	normalizeCustomize(&cp)
+	if customizeEmpty(&cp) {
+		cur.Customize = nil
+	} else {
+		cur.Customize = &cp
+	}
+	return writeConfigYAML(ConfigFilePath(), cur)
+}
+
+func customizeEmpty(c *CustomizeConfig) bool {
+	return c == nil || (c.Upload == nil && c.Download == nil && strings.TrimSpace(c.PromptTheme) == "")
+}
+
+func validateCustomize(c *CustomizeConfig) error {
+	if c == nil {
+		return nil
+	}
+	if c.Upload != nil {
+		if _, err := NormalizeHexColors(c.Upload.ProgressBar.Colors); err != nil {
+			return fmt.Errorf("upload progressbar colors: %w", err)
+		}
+	}
+	if c.Download != nil {
+		if _, err := NormalizeHexColors(c.Download.ProgressBar.Colors); err != nil {
+			return fmt.Errorf("download progressbar colors: %w", err)
+		}
+	}
+	if strings.TrimSpace(c.PromptTheme) != "" {
+		if _, err := NormalizePromptTheme(c.PromptTheme); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeCustomize(c *CustomizeConfig) {
+	if c == nil {
+		return
+	}
+	c.Upload = normalizeTransferUI(c.Upload)
+	c.Download = normalizeTransferUI(c.Download)
+	if strings.TrimSpace(c.PromptTheme) == "" {
+		c.PromptTheme = ""
+		return
+	}
+	if t, err := NormalizePromptTheme(c.PromptTheme); err == nil {
+		c.PromptTheme = t
+	}
+}
+
+func normalizeTransferUI(t *TransferUIConfig) *TransferUIConfig {
+	if t == nil {
+		return nil
+	}
+	colors, err := NormalizeHexColors(t.ProgressBar.Colors)
+	if err != nil {
+		return nil
+	}
+	if len(colors) == 0 && !t.ProgressBar.LongHue {
+		return nil
+	}
+	return &TransferUIConfig{ProgressBar: ProgressBarConfig{
+		Colors:  colors,
+		LongHue: t.ProgressBar.LongHue,
+	}}
+}
+
 func normalizeFileConfig(f *FileConfig) {
 	f.Base = strings.TrimRight(strings.TrimSpace(f.Base), "/")
 	f.Origin = strings.TrimRight(strings.TrimSpace(f.Origin), "/")
@@ -256,6 +460,12 @@ func normalizeFileConfig(f *FileConfig) {
 		f.SelfUpload.BotTokens = NormalizeBotTokens(f.SelfUpload.BotTokens)
 		f.SelfUpload.ChannelID = strings.TrimSpace(f.SelfUpload.ChannelID)
 		f.SelfUpload.GuildID = strings.TrimSpace(f.SelfUpload.GuildID)
+	}
+	if f.Customize != nil {
+		normalizeCustomize(f.Customize)
+		if customizeEmpty(f.Customize) {
+			f.Customize = nil
+		}
 	}
 }
 

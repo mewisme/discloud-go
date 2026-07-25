@@ -35,17 +35,56 @@ func PrintHeader(cmd *cobra.Command) {
 	ClearAndPrintBanner()
 }
 
-// ClearAndPrintBanner clears the TTY and reprints the banner (same as CLI start).
-// Call after an inline TUI exits so the banner stays on screen.
+// ClearAndPrintBanner clears the TTY and reprints the banner when the terminal
+// is wide enough; on narrow terminals it only clears (banner would clip).
 func ClearAndPrintBanner() {
 	if JSON {
 		return
 	}
+	clearScreen()
+	tw := termWidth(os.Stderr)
+	if tw >= BannerContentWidth() {
+		fmt.Fprint(os.Stderr, FormatBanner(tw))
+	}
+}
+
+func clearScreen() {
 	if IsTTY(os.Stderr) {
-		// Clear screen + move cursor home (works in Windows Terminal / modern consoles).
 		fmt.Fprint(os.Stderr, "\033[2J\033[H")
 	}
-	fmt.Fprint(os.Stderr, FormatBanner(termWidth(os.Stderr)))
+}
+
+// BannerContentWidth is the display width of the widest banner art line.
+func BannerContentWidth() int {
+	max := 0
+	for _, line := range strings.Split(strings.Trim(cliBanner, "\n"), "\n") {
+		trim := strings.TrimRight(line, " \t")
+		if trim == "" {
+			continue
+		}
+		if w := displayWidth(trim); w > max {
+			max = w
+		}
+	}
+	return max
+}
+
+// bannerLayout returns left pad and content width used to place the banner in termW.
+// Matches centerLines (odd term widths floor to even).
+func bannerLayout(termW int) (leftPad, contentW int) {
+	contentW = BannerContentWidth()
+	if termW < 1 {
+		return 0, contentW
+	}
+	w := termW
+	if w%2 != 0 {
+		w--
+	}
+	leftPad = (w - contentW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+	return leftPad, contentW
 }
 
 // FormatBanner returns the centered DISCLOUD banner block for the given width

@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"regexp"
 )
 
 // ANSI styles — only applied when stdout/stderr is a TTY and NO_COLOR is unset.
@@ -15,6 +16,13 @@ const (
 	ansiYellow = "\033[33m"
 	ansiCyan   = "\033[36m"
 )
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes CSI color/style sequences for display-width math.
+func stripANSI(s string) string {
+	return ansiEscape.ReplaceAllString(s, "")
+}
 
 // Icon glyphs used in human-readable CLI output.
 const (

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io"
 	"os"
 	"strings"
@@ -207,7 +208,7 @@ type progressModel struct {
 	activeLabel string // in-progress status text: "Uploading" / "Downloading"
 }
 
-func newProgressModel(files []ProgressFile, layout ProgressLayout, termWidth int, cancel context.CancelFunc, activeLabel string) *progressModel {
+func newProgressModel(files []ProgressFile, layout ProgressLayout, termWidth int, cancel context.CancelFunc, activeLabel string, barColors []string, longHue bool) *progressModel {
 	if termWidth < 1 {
 		termWidth = defaultTermWidth
 	}
@@ -231,30 +232,84 @@ func newProgressModel(files []ProgressFile, layout ProgressLayout, termWidth int
 			name:   f.Name,
 			total:  total,
 			status: statusWaiting,
-			bar:    newFileProgressBar(m.barWidth),
+			bar:    newFileProgressBar(m.barWidth, barColors, longHue),
 		}
 	}
 	return m
 }
 
-func newFileProgressBar(width int) progress.Model {
-	return progress.New(
+// DefaultProgressColors is the built-in gradient used when customize is unset.
+func DefaultProgressColors() []string {
+	return []string{
+		"#3f51b1",
+		"#5a55ae",
+		"#7b5fac",
+		"#8f6aae",
+		"#a86aa4",
+		"#cc6b8e",
+		"#f18271",
+		"#f3a469",
+		"#f7c978",
+	}
+}
+
+func newFileProgressBar(width int, hexes []string, longHue bool) progress.Model {
+	if len(hexes) == 0 {
+		hexes = DefaultProgressColors()
+	}
+	opts := []progress.Option{
 		progress.WithFillCharacters('━', '─'),
 		progress.WithoutPercentage(),
-		progress.WithColors(
-			lipgloss.Color("#3f51b1"),
-			lipgloss.Color("#5a55ae"),
-			lipgloss.Color("#7b5fac"),
-			lipgloss.Color("#8f6aae"),
-			lipgloss.Color("#a86aa4"),
-			lipgloss.Color("#cc6b8e"),
-			lipgloss.Color("#f18271"),
-			lipgloss.Color("#f3a469"),
-			lipgloss.Color("#f7c978"),
-		),
-		progress.WithScaled(true),
 		progress.WithWidth(width),
-	)
+	}
+	if longHue {
+		stops := append([]string(nil), hexes...)
+		opts = append(opts, progress.WithColorFunc(func(_, current float64) color.Color {
+			return gradientAt(stops, current, true)
+		}))
+	} else {
+		cols := make([]color.Color, len(hexes))
+		for i, h := range hexes {
+			cols[i] = lipgloss.Color(h)
+		}
+		opts = append(opts, progress.WithColors(cols...), progress.WithScaled(true))
+	}
+	return progress.New(opts...)
+}
+
+// FormatProgressPreview returns a one-line 100% progress bar using hexes (or defaults).
+func FormatProgressPreview(label string, hexes []string) string {
+	return FormatProgressPreviewOpts(label, hexes, false)
+}
+
+// FormatProgressPreviewOpts is FormatProgressPreview with longHue blend control.
+func FormatProgressPreviewOpts(label string, hexes []string, longHue bool) string {
+	if label == "" {
+		label = "Preview"
+	}
+	bar := newFileProgressBar(40, hexes, longHue)
+	return fmt.Sprintf("%s  %s  100%%", label, bar.ViewAs(1))
+}
+
+// ProgressBarPreview is a 100% filled bar for config table cells (no label).
+func ProgressBarPreview(hexes []string, longHue bool, width int) string {
+	if width < 8 {
+		width = 8
+	}
+	return newFileProgressBar(width, hexes, longHue).ViewAs(1)
+}
+
+// PrintProgressPreview writes a one-line 100% progress bar using hexes (or defaults).
+func PrintProgressPreview(w io.Writer, label string, hexes []string) {
+	PrintProgressPreviewOpts(w, label, hexes, false)
+}
+
+// PrintProgressPreviewOpts is PrintProgressPreview with longHue blend control.
+func PrintProgressPreviewOpts(w io.Writer, label string, hexes []string, longHue bool) {
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintln(w, FormatProgressPreviewOpts(label, hexes, longHue))
 }
 
 func (m *progressModel) fixedColsWidth() int {
@@ -448,7 +503,16 @@ func newTransferProgress(w io.Writer, files []ProgressFile, activeLabel string) 
 	layout := NewProgressLayout(names)
 	termW := progressTermWidth(w)
 	ctx, cancel := context.WithCancel(context.Background())
-	m := newProgressModel(files, layout, termW, cancel, activeLabel)
+	kind := "upload"
+	if activeLabel == "Downloading" {
+		kind = "download"
+	}
+	var barColors []string
+	var longHue bool
+	if cust, err := client.LoadCustomize(); err == nil {
+		barColors, longHue = cust.ProgressBarSettings(kind)
+	}
+	m := newProgressModel(files, layout, termW, cancel, activeLabel, barColors, longHue)
 	p := tea.NewProgram(m,
 		tea.WithOutput(w),
 		// Must read the TTY: Bubble Tea queries DEC modes 2026/2027 and the
