@@ -312,7 +312,7 @@ func TestTableTargetOuter(t *testing.T) {
 }
 
 func TestTableLeftPadFollowsBanner(t *testing.T) {
-	t.Parallel()
+	SetContentAlign("center")
 	bw := BannerContentWidth()
 	termW := bw + 20
 	bLeft, _ := bannerLayout(termW)
@@ -326,6 +326,37 @@ func TestTableLeftPadFollowsBanner(t *testing.T) {
 	if got := tableLeftPad(termW, tw); got != want {
 		t.Fatalf("narrow table: left=%d want %d", got, want)
 	}
+}
+
+func TestPadUnderBanner(t *testing.T) {
+	bw := BannerContentWidth()
+	termW := bw + 20
+
+	SetContentAlign("center")
+	left := ContentLeftPad(termW, bw)
+	if left != tableLeftPad(termW, bw) {
+		t.Fatalf("center pad=%d want tableLeftPad=%d", left, tableLeftPad(termW, bw))
+	}
+	got := PadUnderBanner("hi\nthere", termW, bw)
+	pad := strings.Repeat(" ", left)
+	want := pad + "hi\n" + pad + "there"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+
+	SetContentAlign("left")
+	if ContentLeftPad(termW, bw) != 0 {
+		t.Fatalf("left align pad want 0")
+	}
+	bLeft, _ := bannerLayout(termW)
+	if bLeft != 0 {
+		t.Fatalf("left bannerLayout pad=%d want 0", bLeft)
+	}
+	art := placeBannerLines("ab\nabcd\n", 10)
+	if !strings.HasPrefix(art, "ab\n") {
+		t.Fatalf("left banner want no pad, got %q", art)
+	}
+	SetContentAlign("center") // restore for other tests in package
 }
 
 func TestWrapDisplay(t *testing.T) {

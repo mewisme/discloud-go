@@ -449,12 +449,12 @@ func splitCommaFields(s string) []string {
 }
 
 func newConfigSetCustomizeCmd() *cobra.Command {
-	var uploadColors, downloadColors, promptTheme string
+	var uploadColors, downloadColors, promptTheme, align string
 	var resetScope string
 	var uploadLongHue, downloadLongHue bool
 	cmd := &cobra.Command{
 		Use:   "customize",
-		Short: "Configure progress bar colors and prompt theme",
+		Short: "Configure progress bar colors, prompt theme, and align",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			cur, err := client.LoadCustomize()
@@ -466,6 +466,7 @@ func newConfigSetCustomizeCmd() *cobra.Command {
 			upLongFlag := cmd.Flags().Changed("upload-long-hue")
 			downLongFlag := cmd.Flags().Changed("download-long-hue")
 			themeFlag := cmd.Flags().Changed("prompt-theme")
+			alignFlag := cmd.Flags().Changed("align")
 			resetFlag := cmd.Flags().Changed("reset")
 
 			if resetFlag {
@@ -481,13 +482,20 @@ func newConfigSetCustomizeCmd() *cobra.Command {
 				return printClientConfigAfterSet(client.DefaultConfig(), mustLoadSelfUpload())
 			}
 
-			if upFlag || downFlag || upLongFlag || downLongFlag || themeFlag {
+			if upFlag || downFlag || upLongFlag || downLongFlag || themeFlag || alignFlag {
 				if themeFlag {
 					theme, err := client.NormalizePromptTheme(promptTheme)
 					if err != nil {
 						return err
 					}
 					cur.PromptTheme = theme
+				}
+				if alignFlag {
+					a, err := client.NormalizeAlign(align)
+					if err != nil {
+						return err
+					}
+					cur.Align = a
 				}
 				if upFlag {
 					colors, err := parseColorFlag(uploadColors)
@@ -535,7 +543,7 @@ func newConfigSetCustomizeCmd() *cobra.Command {
 			}
 
 			if flagJSON {
-				return fmt.Errorf("pass --upload-colors, --download-colors, --upload-long-hue, --download-long-hue, --prompt-theme, and/or --reset with --json")
+				return fmt.Errorf("pass --upload-colors, --download-colors, --upload-long-hue, --download-long-hue, --prompt-theme, --align, and/or --reset with --json")
 			}
 			if !ui.IsTTY(os.Stdin) {
 				return fmt.Errorf("pass flags or run in a TTY for interactive customize")
@@ -552,6 +560,7 @@ func newConfigSetCustomizeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&uploadLongHue, "upload-long-hue", false, "HSV long-arc blend between upload color stops")
 	cmd.Flags().BoolVar(&downloadLongHue, "download-long-hue", false, "HSV long-arc blend between download color stops")
 	cmd.Flags().StringVar(&promptTheme, "prompt-theme", "", "Huh prompt theme: base16, charm, dracula, catppuccin, default")
+	cmd.Flags().StringVar(&align, "align", "", "UI content align: left or center (default center)")
 	cmd.Flags().StringVar(&resetScope, "reset", "", "Reset to default gradient: upload, download, or both")
 	if f := cmd.Flags().Lookup("reset"); f != nil {
 		f.NoOptDefVal = "both"
@@ -574,18 +583,19 @@ func applyCustomizeReset(cur *client.CustomizeConfig, scope string) error {
 	return nil
 }
 
-// promptAndSaveCustomize walks customize → upload|download|prompt theme → picker.
+// promptAndSaveCustomize walks customize → upload|download|prompt theme|align → picker.
 func promptAndSaveCustomize(cur client.CustomizeConfig) error {
 	var side string
 	if err := runHuh(huh.NewSelect[string]().
 		Title("customize").
 		Description("What to configure?").
 		Options(
-			huh.NewOption("upload", "upload"),
-			huh.NewOption("download", "download"),
-			huh.NewOption("both (upload + download)", "both"),
-			huh.NewOption("prompt theme", "theme"),
-			huh.NewOption("reset to default", "reset"),
+			huh.NewOption("upload progress bar colors", "upload"),
+			huh.NewOption("download progress bar colors", "download"),
+			huh.NewOption("both progress bars (same colors)", "both"),
+			huh.NewOption("prompt theme (huh forms)", "theme"),
+			huh.NewOption("align (banner + tables + prompts)", "align"),
+			huh.NewOption("reset progress colors to default", "reset"),
 		).
 		Value(&side)); err != nil {
 		return err
@@ -597,6 +607,22 @@ func promptAndSaveCustomize(cur client.CustomizeConfig) error {
 			return err
 		}
 		cur.PromptTheme = theme
+		return client.SaveCustomize(&cur)
+	}
+
+	if side == "align" {
+		pick := cur.AlignOrDefault()
+		if err := runHuh(huh.NewSelect[string]().
+			Title("customize.align").
+			Description("UI content alignment (tables, prompts, messages). Default: center.").
+			Options(
+				huh.NewOption("center (banner + content)", "center"),
+				huh.NewOption("left (banner + content)", "left"),
+			).
+			Value(&pick)); err != nil {
+			return err
+		}
+		cur.Align = pick
 		return client.SaveCustomize(&cur)
 	}
 
@@ -713,6 +739,7 @@ func writeCustomizeJSON(c client.CustomizeConfig) error {
 		"path": client.ConfigFilePath(),
 		"customize": map[string]any{
 			"promptTheme": c.PromptThemeOrDefault(),
+			"align":       c.AlignOrDefault(),
 			"upload": map[string]any{
 				"progressbar": map[string]any{"colors": up, "longHue": upLH},
 			},
@@ -751,6 +778,7 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 			},
 			"customize": map[string]any{
 				"promptTheme": cust.PromptThemeOrDefault(),
+				"align":       cust.AlignOrDefault(),
 				"upload": map[string]any{
 					"progressbar": map[string]any{"colors": upCols, "longHue": upLH},
 				},
@@ -830,6 +858,7 @@ func printClientConfigAfterSet(cfg client.Config, su client.SelfUploadConfig) er
 
 // printClientConfig renders Config + Self-upload + Customize as KV blocks.
 func printClientConfig(cfg client.Config, su client.SelfUploadConfig) error {
+	ui.SyncContentAlign()
 	blocks := []ui.KVBlock{configKVBlock(cfg)}
 	if su.Configured() || len(su.BotTokens) > 0 || su.ChannelID != "" || su.GuildID != "" {
 		blocks = append(blocks, selfUploadKVBlock(su))
@@ -853,6 +882,7 @@ func customizeKVBlock(c client.CustomizeConfig, barWidth int) ui.KVBlock {
 		Title: "Customize",
 		Rows: [][]string{
 			{"prompt theme", promptThemeLabel(c.PromptThemeOrDefault())},
+			{"align", c.AlignOrDefault()},
 			{"upload progressbar", upPrev},
 			{"upload longHue", formatBool(upLH)},
 			{"download progressbar", downPrev},

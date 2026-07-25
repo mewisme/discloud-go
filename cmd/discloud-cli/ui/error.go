@@ -19,13 +19,17 @@ func PrintError(err error) {
 	}
 	on := ColorOn(os.Stderr)
 	title, detail, hint := describeError(err)
-	fmt.Fprintf(os.Stderr, "%s %s\n", Red(on, IconFail), Bold(on, title))
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%s %s", Red(on, IconFail), Bold(on, title)))
 	if detail != "" {
-		fmt.Fprintf(os.Stderr, "  %s\n", Dim(on, detail))
+		b.WriteString("\n")
+		b.WriteString("  " + Dim(on, detail))
 	}
 	if hint != "" {
-		fmt.Fprintf(os.Stderr, "  %s %s\n", Cyan(on, IconInfo), hint)
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %s %s", Cyan(on, IconInfo), hint))
 	}
+	PrintUnderBanner(os.Stderr, b.String())
 }
 
 // errPrinted means the UI already showed the failure (prompt rewrite); skip a second line.

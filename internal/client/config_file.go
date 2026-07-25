@@ -65,11 +65,15 @@ type TransferUIConfig struct {
 // DefaultPromptTheme is the huh theme used when customize.promptTheme is unset.
 const DefaultPromptTheme = "base16"
 
+// DefaultAlign is the UI content alignment when customize.align is unset.
+const DefaultAlign = "center"
+
 // CustomizeConfig holds CLI UI/UX customization.
 type CustomizeConfig struct {
 	Upload      *TransferUIConfig `yaml:"upload,omitempty" json:"upload,omitempty"`
 	Download    *TransferUIConfig `yaml:"download,omitempty" json:"download,omitempty"`
 	PromptTheme string            `yaml:"promptTheme,omitempty" json:"promptTheme,omitempty"` // base16|charm|dracula|catppuccin|default
+	Align       string            `yaml:"align,omitempty" json:"align,omitempty"`             // left|center (default center)
 }
 
 // NormalizePromptTheme validates and normalizes a huh prompt theme id.
@@ -93,6 +97,29 @@ func (c CustomizeConfig) PromptThemeOrDefault() string {
 		return DefaultPromptTheme
 	}
 	return t
+}
+
+// NormalizeAlign validates and normalizes UI content alignment.
+// Empty input resolves to DefaultAlign.
+func NormalizeAlign(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "", "center", "centre":
+		return DefaultAlign, nil
+	case "left":
+		return "left", nil
+	default:
+		return "", fmt.Errorf("align: want left or center (got %q)", s)
+	}
+}
+
+// AlignOrDefault returns the configured content alignment, or DefaultAlign.
+func (c CustomizeConfig) AlignOrDefault() string {
+	a, err := NormalizeAlign(c.Align)
+	if err != nil {
+		return DefaultAlign
+	}
+	return a
 }
 
 // ProgressBarSettings returns colors + longHue for "upload" or "download".
@@ -395,7 +422,8 @@ func SaveCustomize(c *CustomizeConfig) error {
 }
 
 func customizeEmpty(c *CustomizeConfig) bool {
-	return c == nil || (c.Upload == nil && c.Download == nil && strings.TrimSpace(c.PromptTheme) == "")
+	return c == nil || (c.Upload == nil && c.Download == nil &&
+		strings.TrimSpace(c.PromptTheme) == "" && strings.TrimSpace(c.Align) == "")
 }
 
 func validateCustomize(c *CustomizeConfig) error {
@@ -417,6 +445,11 @@ func validateCustomize(c *CustomizeConfig) error {
 			return err
 		}
 	}
+	if strings.TrimSpace(c.Align) != "" {
+		if _, err := NormalizeAlign(c.Align); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -428,10 +461,17 @@ func normalizeCustomize(c *CustomizeConfig) {
 	c.Download = normalizeTransferUI(c.Download)
 	if strings.TrimSpace(c.PromptTheme) == "" {
 		c.PromptTheme = ""
-		return
-	}
-	if t, err := NormalizePromptTheme(c.PromptTheme); err == nil {
+	} else if t, err := NormalizePromptTheme(c.PromptTheme); err == nil {
 		c.PromptTheme = t
+	}
+	if strings.TrimSpace(c.Align) == "" {
+		c.Align = ""
+	} else if a, err := NormalizeAlign(c.Align); err == nil {
+		if a == DefaultAlign {
+			c.Align = "" // omit default from yaml
+		} else {
+			c.Align = a
+		}
 	}
 }
 

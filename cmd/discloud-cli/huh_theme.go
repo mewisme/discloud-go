@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
 	"github.com/mewisme/discloud-go/internal/client"
 )
 
@@ -49,12 +50,31 @@ func currentHuhTheme() huh.Theme {
 	return huhThemeByID(c.PromptThemeOrDefault())
 }
 
-// runHuh runs a single huh field with the configured prompt theme (default Base 16).
+// runHuh runs a single huh field with the configured prompt theme (default Base 16),
+// sized and left-padded on the same banner axis as config tables.
 func runHuh(field huh.Field) error {
+	tw := ui.TermWidth(os.Stdout)
+	if tw < 1 {
+		tw = 80
+	}
+	band := ui.ContentBandWidth(tw)
+	left := ui.ContentLeftPad(tw, band)
 	return huh.NewForm(huh.NewGroup(field)).
-		WithTheme(currentHuhTheme()).
+		WithTheme(bannerAlignedTheme(currentHuhTheme(), left)).
+		WithWidth(band).
 		WithShowHelp(false).
 		Run()
+}
+
+func bannerAlignedTheme(base huh.Theme, left int) huh.Theme {
+	if left <= 0 {
+		return base
+	}
+	return huh.ThemeFunc(func(isDark bool) *huh.Styles {
+		s := base.Theme(isDark)
+		s.Form.Base = s.Form.Base.MarginLeft(left)
+		return s
+	})
 }
 
 // promptPromptTheme picks a huh theme with live restyle as the cursor moves.
@@ -139,5 +159,7 @@ func (m *themePickModel) View() tea.View {
 	}, "\n")
 	b.WriteString(st.Focused.Card.Render(preview))
 	b.WriteString("\n")
-	return tea.NewView(b.String())
+	tw := ui.TermWidth(os.Stdout)
+	band := ui.ContentBandWidth(tw)
+	return tea.NewView(ui.PadUnderBanner(b.String(), tw, band))
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -55,7 +56,9 @@ func (s *spinner) loop() {
 				on = ColorOn(f)
 			}
 			frame := Cyan(on, spinnerFrames[i%len(spinnerFrames)])
-			fmt.Fprintf(s.w, "\r%s %s", frame, s.msg)
+			line := frame + " " + s.msg
+			left := ContentLeftPad(termWidth(s.w), displayWidth(line))
+			fmt.Fprintf(s.w, "\r%s%s", strings.Repeat(" ", left), line)
 			i++
 			s.mu.Unlock()
 		}

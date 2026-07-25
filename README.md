@@ -9,6 +9,7 @@ Self-hosted file host that stores files as Discord attachments (fixed **8 MiB*
 - Content-addressed chunks and resumable upload sessions (web IndexedDB + CLI checkpoints)
 - **Self-managed** CLI mode: multi-file `.discloud` bundles, password or obfuscated protection, guild-tier chunk sizing, identity checks on download
 - Interactive CLI pickers (`upload pick` / `get pick`), progress bars, folder walk with `--depth`
+- CLI **customize**: progress-bar gradients + longHue, huh prompt themes, left/center align (banner + tables)
 - Public/private files, password shares, download limits, access-token rotation (server-managed)
 - Cookie sessions and personal API tokens (`dc_…`); first user on a fresh DB is `admin`
 - Compose stack: API + web + Postgres 18 + Valkey 8
@@ -113,6 +114,14 @@ discloud get ./file.bin.discloud --out ./downloads
 discloud files list ./file.bin.discloud
 ```
 
+**Customize UI** (progress colors, prompt theme, align):
+
+```bash
+discloud config set customize
+discloud config set customize --prompt-theme charm --align left
+discloud config set customize --upload-colors '#3f51b1,#f18271,#f7c978' --upload-long-hue
+```
+
 Whole-file digests use **discloud-sha256-v1** (equals `sha256sum` only for single-chunk files ≤ 8 MiB). See [docs/file-integrity.md](docs/file-integrity.md).
 
 ## Operational notes
@@ -132,7 +141,7 @@ Fuller ops: [docs/operations.md](docs/operations.md). Config: [docs/configuratio
 | [Architecture](docs/architecture.md) | Domain model, chunking, upload lifecycle, retention |
 | [Configuration](docs/configuration.md) | Environment variables and fixed limits |
 | [API](docs/api.md) | Routes, auth, uploads, downloads |
-| [CLI](docs/cli.md) | Command tree, install, self-managed mode, completion |
+| [CLI](docs/cli.md) | Command tree, install, self-managed mode, customize, completion |
 | [Security](docs/security.md) | Cookies, tokens, CSRF, secrets |
 | [Operations](docs/operations.md) | Compose, backup, reverse proxy, `DISCLOUD_APP_SECRET` |
 | [File integrity](docs/file-integrity.md) | `discloud-sha256-v1` construction and verify |

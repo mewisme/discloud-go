@@ -203,7 +203,7 @@ func prepareTableView(w io.Writer) {
 }
 
 func tableCenterPad(w io.Writer, contentW int) string {
-	return strings.Repeat(" ", tableLeftPad(termWidth(w), contentW))
+	return strings.Repeat(" ", ContentLeftPad(termWidth(w), contentW))
 }
 
 // tableLeftPad centers contentW under the banner (same axis as bannerLayout).

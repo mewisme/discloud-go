@@ -73,6 +73,20 @@ Resolution order: env → `config.yaml` → `http://localhost:8080` / `http://lo
 | `chunkSize` | Preferred chunk size in **bytes** (UI prompts use MB = MiB) |
 
 Before every self-managed upload, the CLI rechecks the guild premium tier and adjusts the effective chunk size when necessary.
+
+### Customize (`customize` in `config.yaml`)
+
+| Field | Description |
+| --- | --- |
+| `promptTheme` | Huh form theme: `base16` (default), `charm`, `dracula`, `catppuccin`, `default` |
+| `align` | Banner + tables + prompts: `center` (default) or `left` |
+| `upload.progressbar.colors` | Hex stops for upload progress gradient |
+| `upload.progressbar.longHue` | HSV long-arc blend between upload stops |
+| `download.progressbar.colors` | Hex stops for download progress gradient |
+| `download.progressbar.longHue` | HSV long-arc blend between download stops |
+
+Set via `discloud config set customize` (interactive or flags). Details: [cli.md](cli.md).
+
 ## Fixed product limits (not env)
 
 | Limit | Value |

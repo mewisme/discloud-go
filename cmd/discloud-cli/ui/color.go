@@ -91,9 +91,9 @@ func VisibilityLabel(enabled bool, v string) string {
 }
 
 func PrintSuccess(format string, args ...any) {
-	fmt.Println(successMsg(fmt.Sprintf(format, args...)))
+	PrintUnderBanner(os.Stdout, successMsg(fmt.Sprintf(format, args...)))
 }
 
 func PrintInfo(format string, args ...any) {
-	fmt.Println(infoMsg(fmt.Sprintf(format, args...)))
+	PrintUnderBanner(os.Stdout, infoMsg(fmt.Sprintf(format, args...)))
 }

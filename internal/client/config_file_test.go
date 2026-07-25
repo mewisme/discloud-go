@@ -191,6 +191,21 @@ func TestCustomizeSaveLoad(t *testing.T) {
 	if err := SaveCustomize(&CustomizeConfig{PromptTheme: "nope"}); err == nil {
 		t.Fatal("expected invalid prompt theme error")
 	}
+
+	if err := SaveCustomize(&CustomizeConfig{Align: "left"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadCustomize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AlignOrDefault() != "left" {
+		t.Fatalf("align=%q", got.Align)
+	}
+
+	if err := SaveCustomize(&CustomizeConfig{Align: "sideways"}); err == nil {
+		t.Fatal("expected invalid align error")
+	}
 }
 
 func TestNormalizePromptTheme(t *testing.T) {
@@ -208,6 +223,32 @@ func TestNormalizePromptTheme(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, err := NormalizePromptTheme(tc.in)
+		if tc.ok {
+			if err != nil || got != tc.want {
+				t.Fatalf("%q: got %q err=%v want %q", tc.in, got, err, tc.want)
+			}
+			continue
+		}
+		if err == nil {
+			t.Fatalf("%q: expected error", tc.in)
+		}
+	}
+}
+
+func TestNormalizeAlign(t *testing.T) {
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"", "center", true},
+		{"CENTER", "center", true},
+		{"centre", "center", true},
+		{"left", "left", true},
+		{"LEFT", "left", true},
+		{"right", "", false},
+	}
+	for _, tc := range cases {
+		got, err := NormalizeAlign(tc.in)
 		if tc.ok {
 			if err != nil || got != tc.want {
 				t.Fatalf("%q: got %q err=%v want %q", tc.in, got, err, tc.want)

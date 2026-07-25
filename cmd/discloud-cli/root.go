@@ -31,6 +31,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			ui.JSON = flagJSON
+			ui.SyncContentAlign()
 			ui.PrintHeader(cmd)
 		},
 	}

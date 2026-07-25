@@ -70,9 +70,12 @@ func BannerContentWidth() int {
 }
 
 // bannerLayout returns left pad and content width used to place the banner in termW.
-// Matches centerLines (odd term widths floor to even).
+// Matches centerLines (odd term widths floor to even). Left align → pad 0.
 func bannerLayout(termW int) (leftPad, contentW int) {
 	contentW = BannerContentWidth()
+	if contentAlignMode == "left" {
+		return 0, contentW
+	}
 	if termW < 1 {
 		return 0, contentW
 	}
@@ -87,13 +90,13 @@ func bannerLayout(termW int) (leftPad, contentW int) {
 	return leftPad, contentW
 }
 
-// FormatBanner returns the centered DISCLOUD banner block for the given width
-// (including leading blank lines). Used by PrintHeader and embedded TUIs.
+// FormatBanner returns the DISCLOUD banner block for the given width
+// (including leading blank lines). Centered by default; left when align=left.
 func FormatBanner(width int) string {
 	var b strings.Builder
 	b.WriteByte('\n')
 	b.WriteByte('\n')
-	text := centerLines(cliBanner, width)
+	text := placeBannerLines(cliBanner, width)
 	if ColorOn(os.Stderr) {
 		text = Dim(true, text)
 	}
@@ -114,8 +117,53 @@ func BannerHeight(width int) int {
 	return n
 }
 
-// centerLines centers the whole block using one shared left pad from the widest line.
-// Odd widths are floored to even (width-1).
+// placeBannerLines places the banner block: centered (default) or flush left.
+// Odd widths are floored to even when centering (width-1).
+func placeBannerLines(text string, width int) string {
+	if width < 1 {
+		return text
+	}
+	raw := strings.Split(strings.Trim(text, "\n"), "\n")
+	lines := make([]string, 0, len(raw))
+	maxW := 0
+	for _, line := range raw {
+		trim := strings.TrimRight(line, " \t")
+		lines = append(lines, trim)
+		if trim == "" {
+			continue
+		}
+		if w := displayWidth(trim); w > maxW {
+			maxW = w
+		}
+	}
+	pad := 0
+	if contentAlignMode != "left" {
+		w := width
+		if w%2 != 0 {
+			w--
+		}
+		pad = (w - maxW) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	left := strings.Repeat(" ", pad)
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if line == "" {
+			continue
+		}
+		b.WriteString(left)
+		b.WriteString(line)
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
+
+// centerLines always centers the block (ignores align). Used by tests.
 func centerLines(text string, width int) string {
 	if width < 1 {
 		return text

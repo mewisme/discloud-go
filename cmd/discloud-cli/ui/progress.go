@@ -309,7 +309,7 @@ func PrintProgressPreviewOpts(w io.Writer, label string, hexes []string, longHue
 	if w == nil {
 		w = os.Stderr
 	}
-	fmt.Fprintln(w, FormatProgressPreviewOpts(label, hexes, longHue))
+	PrintUnderBanner(w, FormatProgressPreviewOpts(label, hexes, longHue))
 }
 
 func (m *progressModel) fixedColsWidth() int {
@@ -408,7 +408,12 @@ func (m *progressModel) View() tea.View {
 		}
 		b.WriteString(m.renderRow(i))
 	}
-	return tea.NewView(b.String())
+	body := b.String()
+	tw := m.width
+	if tw < 1 {
+		tw = defaultTermWidth
+	}
+	return tea.NewView(PadUnderBanner(body, tw, 0))
 }
 
 func (m *progressModel) renderRow(i int) string {
