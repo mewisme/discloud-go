@@ -2,16 +2,17 @@
 
 [![CI](https://github.com/mewisme/discloud-go/actions/workflows/ci.yml/badge.svg)](https://github.com/mewisme/discloud-go/actions/workflows/ci.yml) [![Release](https://github.com/mewisme/discloud-go/actions/workflows/release.yml/badge.svg)](https://github.com/mewisme/discloud-go/actions/workflows/release.yml) [![Go](https://img.shields.io/github/go-mod/go-version/mewisme/discloud-go?logo=go)](go.mod) [![Latest release](https://img.shields.io/github/v/release/mewisme/discloud-go?logo=github)](https://github.com/mewisme/discloud-go/releases/latest) [![GHCR](https://img.shields.io/badge/ghcr.io-discloud%20%2F%20discloud--web-blue?logo=docker)](https://github.com/mewisme/discloud-go/pkgs/container/discloud) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Self-hosted file host that stores files as Discord attachments (fixed **8 MiB** chunks), with a **Postgres** index, **Valkey** for CDN URL cache and rate/quota counters, a **Go API**, a **Next.js** UI, and a **`discloud` CLI**.
+Self-hosted file host that stores files as Discord attachments (fixed **8 MiB** chunks), with a **Postgres** index, **Valkey** for CDN URL cache and rate/quota counters, a **Go API**, a **Next.js** UI, and a **`discloud` CLI**. The CLI also supports **self-managed** mode: upload/download straight to Discord with portable `.discloud` bundles (no API required for transfer).
 
 ## Features
 
 - Content-addressed chunks and resumable upload sessions (web IndexedDB + CLI checkpoints)
-- Optional **self-managed** CLI mode: upload/download directly to Discord via portable `.discloud` bundles
-- Public/private files, password shares, download limits, access-token rotation
+- **Self-managed** CLI mode: multi-file `.discloud` bundles, password or obfuscated protection, guild-tier chunk sizing, identity checks on download
+- Interactive CLI pickers (`upload pick` / `get pick`), progress bars, folder walk with `--depth`
+- Public/private files, password shares, download limits, access-token rotation (server-managed)
 - Cookie sessions and personal API tokens (`dc_…`); first user on a fresh DB is `admin`
 - Compose stack: API + web + Postgres 18 + Valkey 8
-- CLI via `/install.sh`, `/install.ps1`, Scoop, or Homebrew
+- CLI via instance `/install.sh` · `/install.ps1`, [get.mewis.me](https://get.mewis.me/discloud.sh), Scoop, or Homebrew
 
 ## Architecture
 
@@ -21,11 +22,13 @@ flowchart LR
   api --> pg[(Postgres)]
   api --> vk[(Valkey)]
   api --> discord[Discord_API]
+  cliSelf[CLI_self_mode] --> discord
   clients -->|download_redirect_or_proxy| cdn[Discord_CDN]
   api --> cdn
+  cliSelf --> cdn
 ```
 
-DisCloud uses fixed 8 MiB chunks for broad compatibility with Discord attachment uploads (max 8192 chunks ≈ 64 GiB per file). Details: [docs/architecture.md](docs/architecture.md).
+DisCloud uses fixed 8 MiB chunks for broad compatibility with Discord attachment uploads (max 8192 chunks ≈ 64 GiB per file). Self-managed mode sizes chunks from the guild premium tier instead. Details: [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
@@ -59,11 +62,18 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 
 ## CLI installation
 
-From a running instance:
+From a running instance (web proxy):
 
 ```bash
-curl -fsSL https://files.example.com/install.sh | sh   # macOS / Linux
-irm https://files.example.com/install.ps1 | iex        # Windows
+curl -fsSL http://localhost:3000/install.sh | sh   # macOS / Linux
+irm http://localhost:3000/install.ps1 | iex        # Windows
+```
+
+Public installer:
+
+```bash
+curl -fsSL https://get.mewis.me/discloud.sh | sh   # macOS / Linux
+irm https://get.mewis.me/discloud.ps1 | iex        # Windows
 ```
 
 Or:
@@ -74,20 +84,33 @@ brew install --cask discloud-cli
 go build -o discloud-cli ./cmd/discloud-cli
 ```
 
-The released command is `discloud`. The API container entrypoint is `/discloud`. Full command tree: [docs/cli.md](docs/cli.md).
+Install scripts default `base`/`origin` to `http://localhost:8080` and `http://localhost:3000` (override with `DISCLOUD_BASE` / `DISCLOUD_ORIGIN`).
+
+The released command is `discloud`. The API container entrypoint is `/discloud`. Full command tree and shell completion: [docs/cli.md](docs/cli.md).
 
 ## Basic usage
 
 Web: open http://localhost:3000 — upload files or folders, manage visibility, copy share links. Account at `/me`; inspect at `/i/<file-id>`; admin at `/admin`.
 
+**Server-managed:**
+
 ```bash
-discloud config set --base https://api.example.com --origin https://files.example.com
+discloud config set --base http://localhost:8080 --origin http://localhost:3000
 discloud auth login
 discloud upload ./file.bin
 discloud files list
 discloud files share <file-id> --password 'secret-pass' --mode view --max-downloads 10
 discloud get <file-id> --password 'secret-pass' --download --out ./downloaded.bin
 discloud files verify ./downloaded.bin <sha256>
+```
+
+**Self-managed** (Discord bots in `config.yaml`; no API upload path):
+
+```bash
+discloud config set self-upload
+discloud upload ./file.bin --mode self
+discloud get ./file.bin.discloud --out ./downloads
+discloud files list ./file.bin.discloud
 ```
 
 Whole-file digests use **discloud-sha256-v1** (equals `sha256sum` only for single-chunk files ≤ 8 MiB). See [docs/file-integrity.md](docs/file-integrity.md).
@@ -109,7 +132,7 @@ Fuller ops: [docs/operations.md](docs/operations.md). Config: [docs/configuratio
 | [Architecture](docs/architecture.md) | Domain model, chunking, upload lifecycle, retention |
 | [Configuration](docs/configuration.md) | Environment variables and fixed limits |
 | [API](docs/api.md) | Routes, auth, uploads, downloads |
-| [CLI](docs/cli.md) | Command tree, install, checkpoints |
+| [CLI](docs/cli.md) | Command tree, install, self-managed mode, completion |
 | [Security](docs/security.md) | Cookies, tokens, CSRF, secrets |
 | [Operations](docs/operations.md) | Compose, backup, reverse proxy, `DISCLOUD_APP_SECRET` |
 | [File integrity](docs/file-integrity.md) | `discloud-sha256-v1` construction and verify |
