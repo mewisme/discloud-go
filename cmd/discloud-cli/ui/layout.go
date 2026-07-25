@@ -49,7 +49,7 @@ func ContentAlign() string {
 }
 
 // ContentLeftPad returns left pad for contentW.
-// "center" (default) uses the banner axis; "left" is 0.
+// "left" (default) is 0; "center" uses the banner axis.
 func ContentLeftPad(termW, contentW int) int {
 	if contentAlignMode == "left" {
 		return 0
@@ -58,24 +58,67 @@ func ContentLeftPad(termW, contentW int) int {
 }
 
 // PadUnderBanner left-pads each line of s so the block sits on the banner axis.
-// If contentW <= 0, uses the widest display line of s.
+// If contentW <= 0, uses the widest display line of s (centers short status
+// lines under the banner the same way a narrow table is centered).
 func PadUnderBanner(s string, termW, contentW int) string {
 	if s == "" || termW < 1 {
 		return s
 	}
 	if contentW <= 0 {
 		contentW = blockDisplayWidth(s)
+		if contentW < 1 {
+			contentW = 1
+		}
 	}
 	return padLines(s, ContentLeftPad(termW, contentW))
 }
 
-// PrintUnderBanner writes s + newline, banner-aligned on w.
+// PrintUnderBanner writes s + newline, centered under the banner when
+// contentAlignMode is center (same axis as tables). Uses cursor-column
+// positioning on TTYs so leading alignment cannot be dropped by the console.
 func PrintUnderBanner(w io.Writer, s string) {
 	if w == nil {
 		w = os.Stdout
 	}
 	s = strings.TrimRight(s, "\n")
-	fmt.Fprintln(w, PadUnderBanner(s, termWidth(w), 0))
+	tw := layoutTermWidth()
+	cw := blockDisplayWidth(s)
+	if cw < 1 {
+		cw = 1
+	}
+	left := ContentLeftPad(tw, cw)
+	lines := strings.Split(s, "\n")
+	useCol := false
+	if f, ok := w.(*os.File); ok && IsTTY(f) && left > 0 {
+		useCol = true
+	}
+	for _, line := range lines {
+		if useCol {
+			// CHA: move to 1-based column, then print (avoids stripped leading spaces).
+			fmt.Fprintf(w, "\033[%dG%s\n", left+1, line)
+			continue
+		}
+		if left > 0 {
+			fmt.Fprintln(w, strings.Repeat(" ", left)+line)
+		} else {
+			fmt.Fprintln(w, line)
+		}
+	}
+}
+
+// LayoutTermWidth is the terminal width used for banner/content alignment.
+// Prefers stderr (where the banner is drawn) so stdout size mismatches do not
+// shove content to the left edge of the terminal.
+func LayoutTermWidth() int {
+	return layoutTermWidth()
+}
+
+// layoutTermWidth matches the banner's width source (stderr first).
+func layoutTermWidth() int {
+	if w := termWidth(os.Stderr); w >= 40 {
+		return w
+	}
+	return termWidth(os.Stdout)
 }
 
 func padLines(s string, left int) string {

@@ -91,7 +91,7 @@ func bannerLayout(termW int) (leftPad, contentW int) {
 }
 
 // FormatBanner returns the DISCLOUD banner block for the given width
-// (including leading blank lines). Centered by default; left when align=left.
+// (including leading blank lines). Flush left by default; centered when align=center.
 func FormatBanner(width int) string {
 	var b strings.Builder
 	b.WriteByte('\n')

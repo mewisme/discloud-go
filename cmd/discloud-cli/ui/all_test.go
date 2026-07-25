@@ -343,6 +343,11 @@ func TestPadUnderBanner(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
+	// contentW<=0 centers using the text width (narrow-table axis).
+	shortLeft := ContentLeftPad(termW, displayWidth("hi"))
+	if got0 := PadUnderBanner("hi", termW, 0); got0 != strings.Repeat(" ", shortLeft)+"hi" {
+		t.Fatalf("short default: got %q want pad=%d", got0, shortLeft)
+	}
 
 	SetContentAlign("left")
 	if ContentLeftPad(termW, bw) != 0 {
@@ -397,21 +402,21 @@ func TestDisplayWidthGlyph(t *testing.T) {
 	if displayWidth(IconOK) != 1 {
 		t.Fatalf("✓: got %d want 1", displayWidth(IconOK))
 	}
-	if displayWidth(IconKey) != 2 {
-		t.Fatalf("🔑: got %d want 2", displayWidth(IconKey))
+	if displayWidth(IconKey) != 1 {
+		t.Fatalf("K: got %d want 1", displayWidth(IconKey))
 	}
 	if got := padRight(IconOK, 2); displayWidth(got) != 2 || got != IconOK+" " {
 		t.Fatalf("pad ✓ to 2: %q dw=%d", got, displayWidth(got))
 	}
-	if got := padRight(IconKey, 2); displayWidth(got) != 2 || got != IconKey {
-		t.Fatalf("pad 🔑 to 2: %q dw=%d", got, displayWidth(got))
+	if got := padRight(IconKey, 2); displayWidth(got) != 2 || got != IconKey+" " {
+		t.Fatalf("pad K to 2: %q dw=%d", got, displayWidth(got))
 	}
 	widths := contentWidths([]string{"", "FIELD", "VALUE"}, [][]string{
 		{IconOK, "a", "b"},
 		{IconKey, "c", "d"},
 	})
-	if widths[0] != 2 {
-		t.Fatalf("glyph col width %d, want 2", widths[0])
+	if widths[0] != 1 {
+		t.Fatalf("glyph col width %d, want 1", widths[0])
 	}
 }
 

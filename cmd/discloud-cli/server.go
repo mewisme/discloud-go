@@ -1,14 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 
-	"charm.land/huh/v2"
 	"github.com/mewisme/discloud-go/cmd/discloud-cli/ui"
-	"github.com/mewisme/discloud-go/internal/client"
 	"github.com/mewisme/discloud-go/internal/localserver"
 	"github.com/mewisme/discloud-go/internal/serverconfig"
 	"github.com/mewisme/discloud-go/internal/userdir"
@@ -59,7 +60,7 @@ func newServerInstallCmd() *cobra.Command {
 				return writeJSON(res)
 			}
 			ui.PrintSuccess("Installed DisCloud server %s", ui.Bold(ui.ColorOn(os.Stdout), res.Version))
-			fmt.Println("Run `discloud server start` to start the local server.")
+			ui.PrintInfo("Run `discloud server start` to start the local server.")
 			return nil
 		}),
 	}
@@ -87,9 +88,9 @@ func newServerUpdateCmd() *cobra.Command {
 			}
 			ui.PrintSuccess("Updated DisCloud server to %s", ui.Bold(ui.ColorOn(os.Stdout), res.Version))
 			if res.Restarted {
-				fmt.Println("Server was running and has been restarted.")
+				ui.PrintInfo("Server was running and has been restarted.")
 			} else {
-				fmt.Println("Server left stopped (it was not running before the update).")
+				ui.PrintInfo("Server left stopped (it was not running before the update).")
 			}
 			return nil
 		}),
@@ -126,7 +127,7 @@ func newServerUninstallCmd() *cobra.Command {
 			}
 			ui.PrintSuccess("Local server uninstalled")
 			for _, line := range res.Messages {
-				fmt.Println(line)
+				ui.PrintInfo("%s", line)
 			}
 			return nil
 		}),
@@ -244,14 +245,15 @@ func newServerStatusCmd() *cobra.Command {
 
 func newServerLogsCmd() *cobra.Command {
 	var tail int
-	var follow bool
+	follow := true
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: "Show local server logs",
+		Short: "Stream local server logs (Ctrl+C to stop)",
 		Args:  cobra.NoArgs,
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			path := localserver.LogPathDefault()
-			if flagJSON && !follow {
+			if flagJSON {
+				// Machine output is always a one-shot tail of raw lines.
 				lines, err := localserver.TailLogDefault(tail)
 				if err != nil {
 					return err
@@ -259,11 +261,17 @@ func newServerLogsCmd() *cobra.Command {
 				return writeJSON(map[string]any{"path": path, "lines": lines})
 			}
 			fmt.Fprintln(os.Stderr, path)
-			return localserver.PrintLogsDefault(os.Stdout, tail, follow)
+			ctx, stop := ui.ContextWithInterrupt(context.Background())
+			defer stop()
+			err := localserver.PrintLogsDefault(ctx, logDisplay{w: os.Stdout}, tail, follow)
+			if err != nil && errors.Is(err, context.Canceled) {
+				return context.Canceled
+			}
+			return err
 		}),
 	}
-	cmd.Flags().IntVar(&tail, "tail", 100, "number of recent lines")
-	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow log output")
+	cmd.Flags().IntVar(&tail, "tail", 100, "number of recent lines to show first")
+	cmd.Flags().BoolVarP(&follow, "follow", "f", true, "stream new lines until Ctrl+C (default true; --follow=false for one-shot)")
 	return cmd
 }
 
@@ -420,13 +428,11 @@ func newServerConfigSetCmd() *cobra.Command {
 			}
 			if !flagJSON && ui.IsTTY(os.Stdin) && len(f.BotTokens) == 0 &&
 				!cmd.Flags().Changed("database-url") && !cmd.Flags().Changed("valkey-url") {
-				tok, err := promptSecret("Discord bot token")
+				toks, err := promptBotTokens()
 				if err != nil {
 					return err
 				}
-				if tok != "" {
-					f.BotTokens = []string{tok}
-				}
+				f.BotTokens = toks
 			}
 			if err := serverconfig.Save(userdir.ServerInstallDir(), f); err != nil {
 				return err
@@ -493,11 +499,11 @@ func promptServerBasics(opts *localserver.InstallOptions) error {
 		return err
 	}
 	if len(f.BotTokens) == 0 {
-		tok, err := promptSecret("Discord bot token")
+		toks, err := promptBotTokens()
 		if err != nil {
 			return err
 		}
-		opts.BotToken = tok
+		opts.BotTokens = toks
 	}
 	if strings.TrimSpace(f.ChannelID) == "" {
 		ch, err := promptArg("", "Discord channel ID")
@@ -509,17 +515,6 @@ func promptServerBasics(opts *localserver.InstallOptions) error {
 	return nil
 }
 
-func promptSecret(title string) (string, error) {
-	if flagJSON || !ui.IsTTY(os.Stdin) {
-		return "", fmt.Errorf("%s: interactive secret prompt requires a TTY", title)
-	}
-	var v string
-	if err := runHuh(huh.NewInput().Title(title).EchoMode(huh.EchoModePassword).Value(&v)); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(v), nil
-}
-
 func formatPID(pid int) string {
 	if pid <= 0 {
 		return ""
@@ -527,5 +522,53 @@ func formatPID(pid int) string {
 	return strconv.Itoa(pid)
 }
 
-// keep client import used for LoadFileConfig in sync path inside localserver
-var _ = client.LoadFileConfig
+// logDisplay writes each line flush-left with level colors (not banner-padded).
+// PrintLogsDefault / Follow write one full line per Write via Fprintln.
+type logDisplay struct{ w io.Writer }
+
+func (d logDisplay) Write(p []byte) (int, error) {
+	s := strings.TrimRight(string(p), "\r\n")
+	if s != "" {
+		fmt.Fprintln(d.w, colorizeLogLine(s))
+	}
+	return len(p), nil
+}
+
+func colorizeLogLine(s string) string {
+	on := ui.ColorOn(os.Stdout)
+	if !on {
+		return s
+	}
+	// "15:04:05  INFO   msg …" or "INFO   msg …"
+	fields := strings.SplitN(s, "  ", 3)
+	if len(fields) < 2 {
+		return s
+	}
+	levelIdx := 0
+	if len(fields[0]) == 8 && fields[0][2] == ':' { // HH:MM:SS
+		if len(fields) < 3 {
+			return s
+		}
+		levelIdx = 1
+	}
+	level := strings.TrimSpace(fields[levelIdx])
+	var colored string
+	switch level {
+	case "DEBUG":
+		colored = ui.Dim(true, level)
+	case "INFO":
+		colored = ui.Cyan(true, level)
+	case "WARN", "WARNING":
+		colored = ui.Yellow(true, level)
+	case "ERROR":
+		colored = ui.Red(true, level)
+	default:
+		return s
+	}
+	pad := 5 - len(level)
+	if pad < 0 {
+		pad = 0
+	}
+	fields[levelIdx] = colored + strings.Repeat(" ", pad)
+	return strings.Join(fields, "  ")
+}

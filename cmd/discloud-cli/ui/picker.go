@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -33,8 +34,10 @@ func WaitPicker(what string) {
 		}
 		secs := int((left + time.Second - 1) / time.Second)
 		on := ColorOn(os.Stderr)
-		msg := fmt.Sprintf("Opening %s in %ds… (Enter to open now)", what, secs)
-		fmt.Fprintf(os.Stderr, "\r\033[K%s %s", Cyan(on, IconInfo), msg)
+		line := Cyan(on, IconInfo) + " " + fmt.Sprintf("Opening %s in %ds… (Enter to open now)", what, secs)
+		tw := termWidth(os.Stderr)
+		pad := ContentLeftPad(tw, displayWidth(line))
+		fmt.Fprintf(os.Stderr, "\r\033[K%s%s", strings.Repeat(" ", pad), line)
 
 		select {
 		case <-ticker.C:
@@ -72,7 +75,7 @@ func Selected(what string, paths ...string) {
 	default:
 		PrintInfo("Selected %s: %d items", what, len(paths))
 		for _, p := range paths {
-			fmt.Printf("  %s\n", p)
+			PrintUnderBanner(os.Stdout, "  "+p)
 		}
 	}
 }

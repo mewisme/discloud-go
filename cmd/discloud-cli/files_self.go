@@ -233,8 +233,9 @@ func filesDeleteBundle(path string, selectors []string, all, yes, localOnly, kee
 	}
 	ui.PrintSuccess("Removed %d file(s) from bundle", len(selected))
 	if !localOnly {
-		fmt.Fprintf(os.Stderr, "Discord: deleted=%d missing=%d unauthorized=%d failed=%d\n",
-			delRes.Deleted, delRes.Missing, delRes.Unauthorized, delRes.Failed)
+		ui.PrintUnderBanner(os.Stderr, fmt.Sprintf(
+			"Discord: deleted=%d missing=%d unauthorized=%d failed=%d",
+			delRes.Deleted, delRes.Missing, delRes.Unauthorized, delRes.Failed))
 	}
 	return nil
 }

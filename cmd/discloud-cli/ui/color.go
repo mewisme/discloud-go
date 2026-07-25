@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 )
@@ -26,13 +27,31 @@ func stripANSI(s string) string {
 
 // Icon glyphs used in human-readable CLI output.
 const (
-	IconOK     = "✓"
-	IconFail   = "✗"
-	IconInfo   = "•"
-	IconKey    = "🔑"
-	IconLock   = "🔒"
-	IconUnlock = "🔓"
-	IconUp     = "↑"
+	IconOK       = "✓"
+	IconFail     = "✗"
+	IconInfo     = "•"
+	IconWarning  = "!"
+	IconQuestion = "?"
+	IconKey      = "K"
+	IconLock     = "#"
+	IconUnlock   = "O"
+
+	IconUpload     = "↑"
+	IconDownload   = "↓"
+	IconArrowUp    = "↑"
+	IconArrowDown  = "↓"
+	IconArrowLeft  = "←"
+	IconArrowRight = "→"
+
+	IconFolder = "□"
+	IconFile   = "≡"
+	IconSearch = ">"
+	IconLink   = "="
+	IconConfig = "*"
+	IconTrash  = "-"
+	IconClock  = "@"
+	IconRocket = "^"
+	IconStar   = "*"
 )
 
 func ColorOn(f *os.File) bool {
@@ -91,9 +110,18 @@ func VisibilityLabel(enabled bool, v string) string {
 }
 
 func PrintSuccess(format string, args ...any) {
-	PrintUnderBanner(os.Stdout, successMsg(fmt.Sprintf(format, args...)))
+	// Prefer stderr so success shares the banner/spinner stream and contentAlignMode pad.
+	w := io.Writer(os.Stdout)
+	if ShowWaitUI() || IsTTY(os.Stderr) {
+		w = os.Stderr
+	}
+	PrintUnderBanner(w, successMsg(fmt.Sprintf(format, args...)))
 }
 
 func PrintInfo(format string, args ...any) {
-	PrintUnderBanner(os.Stdout, infoMsg(fmt.Sprintf(format, args...)))
+	w := io.Writer(os.Stdout)
+	if ShowWaitUI() || IsTTY(os.Stderr) {
+		w = os.Stderr
+	}
+	PrintUnderBanner(w, infoMsg(fmt.Sprintf(format, args...)))
 }

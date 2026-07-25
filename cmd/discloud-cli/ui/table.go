@@ -134,9 +134,9 @@ func paintGlyph(on bool, padded string) string {
 		return Green(on, padded)
 	case IconFail:
 		return Red(on, padded)
-	case IconKey, IconLock:
+	case IconKey, IconLock, IconWarning:
 		return Yellow(on, padded)
-	case IconUnlock, IconInfo:
+	case IconUnlock, IconInfo, IconUpload, IconDownload:
 		return Cyan(on, padded)
 	default:
 		return padded

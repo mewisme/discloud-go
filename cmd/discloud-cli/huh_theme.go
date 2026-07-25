@@ -53,7 +53,7 @@ func currentHuhTheme() huh.Theme {
 // runHuh runs a single huh field with the configured prompt theme (default Base 16),
 // sized and left-padded on the same banner axis as config tables.
 func runHuh(field huh.Field) error {
-	tw := ui.TermWidth(os.Stdout)
+	tw := ui.LayoutTermWidth()
 	if tw < 1 {
 		tw = 80
 	}

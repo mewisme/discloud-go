@@ -35,6 +35,32 @@ func TestTailReturnsLastLines(t *testing.T) {
 	}
 }
 
+func TestFormatLogLine(t *testing.T) {
+	t.Parallel()
+	in := `{"time":"2026-07-25T12:34:56.789Z","level":"INFO","msg":"request","method":"GET","path":"/readyz","status":200,"duration_ms":3}`
+	got := FormatLogLine(in)
+	if !strings.Contains(got, "INFO") || !strings.Contains(got, "request") {
+		t.Fatalf("got %q", got)
+	}
+	if !strings.Contains(got, "method=GET") || !strings.Contains(got, "status=200") {
+		t.Fatalf("attrs missing: %q", got)
+	}
+	if strings.Contains(got, "{") {
+		t.Fatalf("still JSON: %q", got)
+	}
+
+	plain := FormatLogLine("not json at all")
+	if plain != "not json at all" {
+		t.Fatalf("plain = %q", plain)
+	}
+
+	fakeTok := strings.Repeat("A", 24) + "." + strings.Repeat("B", 6) + "." + strings.Repeat("C", 27)
+	sec := FormatLogLine(`{"msg":"boot","token":"` + fakeTok + `"}`)
+	if strings.Contains(sec, fakeTok) {
+		t.Fatalf("secret leaked: %q", sec)
+	}
+}
+
 func TestRedactHidesSecrets(t *testing.T) {
 	// Built at runtime so secret scanners do not flag a Discord-shaped literal.
 	fakeTok := strings.Repeat("A", 24) + "." + strings.Repeat("B", 6) + "." + strings.Repeat("C", 27)

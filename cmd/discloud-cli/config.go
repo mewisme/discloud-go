@@ -303,7 +303,7 @@ func newConfigSetSelfUploadCmd() *cobra.Command {
 				return err
 			}
 			if n := len(su.BotTokens); n > 0 && n < 5 {
-				fmt.Fprintln(os.Stderr, "For better upload performance, configuring at least 5 Discord bot tokens is recommended.")
+				ui.PrintUnderBanner(os.Stderr, "For better upload performance, configuring at least 5 Discord bot tokens is recommended.")
 			}
 			if flagJSON {
 				return writeJSON(map[string]any{
@@ -379,7 +379,7 @@ func promptAndSaveSelfUpload(cur client.SelfUploadConfig) error {
 		return err
 	}
 	if n := len(su.BotTokens); n > 0 && n < 5 {
-		fmt.Fprintln(os.Stderr, "For better upload performance, configuring at least 5 Discord bot tokens is recommended.")
+		ui.PrintUnderBanner(os.Stderr, "For better upload performance, configuring at least 5 Discord bot tokens is recommended.")
 	}
 	if flagJSON {
 		return writeJSON(map[string]any{
@@ -395,16 +395,15 @@ func promptAndSaveSelfUpload(cur client.SelfUploadConfig) error {
 }
 
 // promptBotTokens collects tokens. Comma-separated values count as multiple tokens
-// and advance the #N label. Two consecutive empty entries finish the prompt.
+// and advance the #N label. First token is required; one empty after that finishes.
 func promptBotTokens() ([]string, error) {
 	var tokens []string
-	emptyStreak := 0
 	for {
 		var tok string
 		n := len(tokens) + 1
 		err := runHuh(huh.NewInput().
 			Title(fmt.Sprintf("Discord bot token #%d", n)).
-			Description("Paste one token, or several separated by commas. Empty twice to continue.").
+			Description("Paste one token, or several separated by commas. Empty to continue.").
 			EchoMode(huh.EchoModePassword).
 			Value(&tok))
 		if err != nil {
@@ -412,13 +411,11 @@ func promptBotTokens() ([]string, error) {
 		}
 		parts := splitCommaFields(tok)
 		if len(parts) == 0 {
-			emptyStreak++
-			if emptyStreak >= 2 {
-				break
+			if len(tokens) == 0 {
+				continue // first token required
 			}
-			continue
+			break
 		}
-		emptyStreak = 0
 		tokens = append(tokens, parts...)
 	}
 	tokens = client.NormalizeBotTokens(tokens)
@@ -560,7 +557,7 @@ func newConfigSetCustomizeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&uploadLongHue, "upload-long-hue", false, "HSV long-arc blend between upload color stops")
 	cmd.Flags().BoolVar(&downloadLongHue, "download-long-hue", false, "HSV long-arc blend between download color stops")
 	cmd.Flags().StringVar(&promptTheme, "prompt-theme", "", "Huh prompt theme: base16, charm, dracula, catppuccin, default")
-	cmd.Flags().StringVar(&align, "align", "", "UI content align: left or center (default center)")
+	cmd.Flags().StringVar(&align, "align", "", "UI content align: left or center (default left)")
 	cmd.Flags().StringVar(&resetScope, "reset", "", "Reset to default gradient: upload, download, or both")
 	if f := cmd.Flags().Lookup("reset"); f != nil {
 		f.NoOptDefVal = "both"
@@ -614,10 +611,10 @@ func promptAndSaveCustomize(cur client.CustomizeConfig) error {
 		pick := cur.AlignOrDefault()
 		if err := runHuh(huh.NewSelect[string]().
 			Title("customize.align").
-			Description("UI content alignment (tables, prompts, messages). Default: center.").
+			Description("UI content alignment (tables, prompts, messages). Default: left.").
 			Options(
-				huh.NewOption("center (banner + content)", "center"),
 				huh.NewOption("left (banner + content)", "left"),
+				huh.NewOption("center (banner + content)", "center"),
 			).
 			Value(&pick)); err != nil {
 			return err

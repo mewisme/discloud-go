@@ -2,9 +2,12 @@ package localserver
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -74,13 +77,14 @@ func RedactedTail(p Paths, n int) string {
 }
 
 // Follow writes the last n lines then streams appended lines until ctx ends.
+// Each line is passed through FormatLogLine for human display.
 func Follow(ctx context.Context, p Paths, n int, w io.Writer) error {
 	lines, err := Tail(p, n)
 	if err != nil {
 		return err
 	}
 	for _, line := range lines {
-		if _, err := io.WriteString(w, line+"\n"); err != nil {
+		if err := writeLogLine(w, line); err != nil {
 			return err
 		}
 	}
@@ -89,11 +93,17 @@ func Follow(ctx context.Context, p Paths, n int, w io.Writer) error {
 	if info, err := os.Stat(p.LogPath()); err == nil {
 		offset = info.Size()
 	}
+	var carry string
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-time.After(500 * time.Millisecond):
+			return ctx.Err()
+		case <-ticker.C:
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		info, err := os.Stat(p.LogPath())
 		if err != nil {
@@ -101,24 +111,157 @@ func Follow(ctx context.Context, p Paths, n int, w io.Writer) error {
 		}
 		if info.Size() < offset {
 			offset = 0 // truncated
+			carry = ""
 		}
 		if info.Size() == offset {
 			continue
 		}
-		f, err := os.Open(p.LogPath())
+		chunk, err := readFrom(p.LogPath(), offset)
 		if err != nil {
 			continue
 		}
-		if _, err := f.Seek(offset, io.SeekStart); err == nil {
-			written, cerr := io.Copy(w, f)
-			offset += written
-			if cerr != nil {
-				f.Close()
-				return cerr
+		offset += int64(len(chunk))
+		text := carry + string(chunk)
+		parts := strings.Split(text, "\n")
+		carry = parts[len(parts)-1]
+		for _, line := range parts[:len(parts)-1] {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := writeLogLine(w, line); err != nil {
+				return err
 			}
 		}
-		f.Close()
 	}
+}
+
+func readFrom(path string, offset int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(f)
+}
+
+func writeLogLine(w io.Writer, line string) error {
+	out := FormatLogLine(line)
+	if out == "" {
+		return nil
+	}
+	_, err := fmt.Fprintln(w, out)
+	return err
+}
+
+// FormatLogLine turns a slog JSON log line into a compact human line.
+// Non-JSON lines are redacted and returned as-is.
+// Example: 15:04:05  INFO   request  method=GET path=/readyz status=200
+func FormatLogLine(line string) string {
+	line = strings.TrimRight(line, "\r\n")
+	if strings.TrimSpace(line) == "" {
+		return ""
+	}
+	redacted := Redact(line)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(redacted), &m); err != nil {
+		return redacted
+	}
+
+	msg, _ := m["msg"].(string)
+	if msg == "" {
+		if s, ok := m["message"].(string); ok {
+			msg = s
+		}
+	}
+	level := "INFO"
+	if v, ok := m["level"]; ok && v != nil {
+		if s := strings.ToUpper(strings.TrimSpace(fmt.Sprint(v))); s != "" && s != "<NIL>" {
+			level = s
+		}
+	}
+
+	tstr := formatLogTime(m["time"])
+
+	skip := map[string]struct{}{
+		"time": {}, "level": {}, "msg": {}, "message": {}, "source": {},
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if _, ok := skip[k]; ok {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	if tstr != "" {
+		b.WriteString(tstr)
+		b.WriteString("  ")
+	}
+	b.WriteString(fmt.Sprintf("%-5s", level))
+	if msg != "" {
+		b.WriteString("  ")
+		b.WriteString(msg)
+	}
+	for _, k := range keys {
+		b.WriteByte(' ')
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(formatLogAttr(m[k]))
+	}
+	return b.String()
+}
+
+func formatLogTime(v any) string {
+	switch t := v.(type) {
+	case string:
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if parsed, err := time.Parse(layout, t); err == nil {
+				return parsed.Local().Format("15:04:05")
+			}
+		}
+		return t
+	case float64:
+		// JSON numbers are rare for slog time; treat as unix seconds if huge.
+		if t > 1e9 {
+			return time.Unix(int64(t), 0).Local().Format("15:04:05")
+		}
+	}
+	return ""
+}
+
+func formatLogAttr(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		if strings.ContainsAny(x, " \t\"=") {
+			return strconvQuote(x)
+		}
+		return x
+	case float64:
+		if x == float64(int64(x)) {
+			return fmt.Sprintf("%d", int64(x))
+		}
+		return fmt.Sprintf("%g", x)
+	case bool:
+		return fmt.Sprintf("%t", x)
+	default:
+		b, err := json.Marshal(x)
+		if err != nil {
+			return fmt.Sprint(x)
+		}
+		return string(b)
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // Redact masks bot tokens and keyed secrets in a log line.

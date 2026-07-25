@@ -179,8 +179,8 @@ func newFilesVerifyCmd() *cobra.Command {
 				}
 				on := ui.ColorOn(os.Stdout)
 				if !strings.EqualFold(got, want) {
-					fmt.Fprintf(os.Stderr, "%s mismatch\n  got  %s\n  want %s\n",
-						ui.Red(on, "verify failed"), got, want)
+					ui.PrintUnderBanner(os.Stderr, fmt.Sprintf("%s mismatch\n  got  %s\n  want %s",
+						ui.Red(on, "verify failed"), got, want))
 					return fmt.Errorf("digest mismatch")
 				}
 				ui.PrintSuccess("%s %s matches %s",
@@ -466,7 +466,7 @@ func newFilesRotateTokenCmd() *cobra.Command {
 			on := ui.ColorOn(os.Stdout)
 			ui.PrintSuccess("Rotated token for %s", ui.Cyan(on, item.FileID))
 			if item.AccessToken != "" {
-				fmt.Printf("%s %s\n", ui.Yellow(on, ui.IconKey), ui.Cyan(on, item.AccessToken))
+				ui.PrintUnderBanner(os.Stdout, fmt.Sprintf("%s %s", ui.Yellow(on, ui.IconKey), ui.Cyan(on, item.AccessToken)))
 			}
 			return nil
 		}),

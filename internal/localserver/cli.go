@@ -2,7 +2,6 @@ package localserver
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -15,7 +14,7 @@ import (
 type InstallOptions struct {
 	Version   string
 	Yes       bool
-	BotToken  string
+	BotTokens []string
 	ChannelID string
 	CORS      string
 }
@@ -121,15 +120,15 @@ func UninstallCLI(ctx context.Context, opts UninstallOptions) (CLIInstallResult,
 }
 
 func applyInstallSecrets(p Paths, opts InstallOptions) error {
-	if opts.BotToken == "" && opts.ChannelID == "" && opts.CORS == "" {
+	if len(opts.BotTokens) == 0 && opts.ChannelID == "" && opts.CORS == "" {
 		return nil
 	}
 	f, err := serverconfig.Load(p.InstallDir)
 	if err != nil {
 		return err
 	}
-	if opts.BotToken != "" {
-		f.BotTokens = []string{opts.BotToken}
+	if len(opts.BotTokens) > 0 {
+		f.BotTokens = opts.BotTokens
 	}
 	if opts.ChannelID != "" {
 		f.ChannelID = opts.ChannelID
@@ -249,8 +248,9 @@ func LogPathDefault() string { return DefaultPaths().LogPath() }
 // TailLogDefault returns the last n log lines.
 func TailLogDefault(n int) ([]string, error) { return Tail(DefaultPaths(), n) }
 
-// PrintLogsDefault prints or follows logs.
-func PrintLogsDefault(w io.Writer, n int, follow bool) error {
+// PrintLogsDefault prints or follows logs in human-readable form.
+// When follow is true, streams until ctx is cancelled (Ctrl+C).
+func PrintLogsDefault(ctx context.Context, w io.Writer, n int, follow bool) error {
 	p := DefaultPaths()
 	if !follow {
 		lines, err := Tail(p, n)
@@ -258,11 +258,14 @@ func PrintLogsDefault(w io.Writer, n int, follow bool) error {
 			return err
 		}
 		for _, line := range lines {
-			if _, err := fmt.Fprintln(w, line); err != nil {
+			if err := writeLogLine(w, line); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	return Follow(context.Background(), p, n, w)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return Follow(ctx, p, n, w)
 }

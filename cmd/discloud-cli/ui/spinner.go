@@ -57,7 +57,9 @@ func (s *spinner) loop() {
 			}
 			frame := Cyan(on, spinnerFrames[i%len(spinnerFrames)])
 			line := frame + " " + s.msg
-			left := ContentLeftPad(termWidth(s.w), displayWidth(line))
+			// Center under banner like PrintSuccess (narrow content axis).
+			tw := layoutTermWidth()
+			left := ContentLeftPad(tw, displayWidth(line))
 			fmt.Fprintf(s.w, "\r%s%s", strings.Repeat(" ", left), line)
 			i++
 			s.mu.Unlock()

@@ -165,8 +165,9 @@ func uploadSelf(jobs []uploadJob, workers int, dataFile string, force, usePasswo
 	adj := transfer.ResolveChunkSize(su.ChunkSize, su.PremiumTier, tier, interactive)
 	chunkSize := adj.EffectiveSize
 	if adj.Downgraded {
-		fmt.Fprintf(os.Stderr, "The guild upload tier decreased from %d to %d.\nChunk size was reduced from %s to %s.\n",
-			adj.OldTier, adj.Tier, transfer.FormatChunkMB(adj.OldSize), transfer.FormatChunkMB(chunkSize))
+		ui.PrintUnderBanner(os.Stderr, fmt.Sprintf(
+			"The guild upload tier decreased from %d to %d.\nChunk size was reduced from %s to %s.",
+			adj.OldTier, adj.Tier, transfer.FormatChunkMB(adj.OldSize), transfer.FormatChunkMB(chunkSize)))
 	}
 	if adj.NeedsUpgrade {
 		var choice string
@@ -285,7 +286,7 @@ func uploadSelf(jobs []uploadJob, workers int, dataFile string, force, usePasswo
 			},
 		}})
 		if password == "" {
-			fmt.Fprintln(os.Stderr, "This bundle is obfuscated and integrity-protected. It is not securely encrypted because any compatible DisCloud CLI build can decode it.")
+			ui.PrintUnderBanner(os.Stderr, "This bundle is obfuscated and integrity-protected. It is not securely encrypted because any compatible DisCloud CLI build can decode it.")
 		}
 	}
 
@@ -504,13 +505,12 @@ func promptUploadPaths() ([]string, error) {
 		return nil, fmt.Errorf("path is required")
 	}
 	var paths []string
-	emptyStreak := 0
 	for {
 		var v string
 		n := len(paths) + 1
 		err := runHuh(huh.NewInput().
 			Title(fmt.Sprintf("Path #%d", n)).
-			Description("Enter a file or folder path (comma-separated ok). Empty twice to start upload.").
+			Description("Enter a file or folder path (comma-separated ok). Empty to continue.").
 			Value(&v).
 			Validate(func(s string) error {
 				parts := splitCommaFields(s)
@@ -533,13 +533,11 @@ func promptUploadPaths() ([]string, error) {
 			return nil, err
 		}
 		if empty {
-			emptyStreak++
-			if emptyStreak >= 2 {
-				break
+			if len(paths) == 0 {
+				continue // first path required
 			}
-			continue
+			break
 		}
-		emptyStreak = 0
 	}
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("at least one path is required")

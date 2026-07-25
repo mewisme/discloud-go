@@ -91,7 +91,7 @@ discloud                                    (--base, --origin, --json, -v/--vers
 │   ├── uninstall                           (--purge, -y/--yes)
 │   ├── start | stop | restart
 │   ├── status                              (--show-secret)
-│   ├── logs                                (--tail, -f/--follow)
+│   ├── logs                                (--tail; -f/--follow default on)
 │   ├── version
 │   └── config                              (show | get | set | unset | path)
 ├── config
@@ -146,7 +146,7 @@ selfUpload:
 - Missing args often prompt (username, password, file id picker, upload mode, chunk size).
 - Passwords prefer secure prompts or `--password-stdin` over positional args.
 - TTY-aware tables, spinners, and upload/download progress bars (self-managed and server `get`; skipped with `--json`; `--meta` keeps a spinner). Ctrl+C / Esc aborts the transfer.
-- Banner, tables, prompts, and status lines follow `customize.align` (`center` default under the banner axis, or `left`). Huh forms use `customize.promptTheme` (default Base 16).
+- Banner, tables, prompts, and status lines follow `customize.align` (`left` default, or `center` under the banner axis). Huh forms use `customize.promptTheme` (default Base 16).
 - File/folder paths: pass args, or omit to prompt; `upload pick` / `get pick` open GUI dialogs after a 3s countdown (Enter opens immediately). `upload pick` asks files vs folder; folder mode lists nested paths (`folder/child/file`) with filter, Space toggle, `a` select-all, Enter to upload. `--depth N` limits folder walks (`0` = unlimited, default; `1` = top-level files only). `get pick` picks the `.discloud` (if no arg), then the save folder, then a TUI file list (same keys as upload); nested logical paths recreate folders under the save dir; existing dest files prompt overwrite (or `--force`); declining rename saves as `name.N.ext` (`N` increments while that path exists).
 - `--json` disables interactive prompts that would mix with machine output.
 - User abort (Ctrl+C / Esc / dialog cancel) exits quietly (status 0).
@@ -207,12 +207,12 @@ discloud config set customize \
   --download-colors '#0000ff,#00ff00'
 ```
 
-Progress bar colors, prompt theme, and align live under `customize` in `config.yaml`. Interactive mode asks what to edit (`upload` / `download` / `both` / **prompt theme** / **align** / **reset to default**). Color paths open a **centered** HSL picker with a **live 100% preview**. Choosing **both** runs one picker and applies the same stops + longHue to upload and download. **Prompt theme** opens a live-styled list of huh themes (default **Base 16**); moving the cursor restyles the preview. **Align** chooses `center` (default, banner + content under the banner axis) or `left` (banner and content flush left). Use **prev/next** (`[`/`]` or click) between color steps; **`h` / click hex** to type `#RGB`/`#RRGGBB` directly; **`r` / reset** restores the built-in gradient; **`l` / long hue** toggles HSV long-arc blend; Enter applies the current step; Esc saves. Flags take comma-separated `#RGB` / `#RRGGBB`, `--prompt-theme`, `--align`, or `--reset[=upload|download|both]`. Empty / unset uses the built-in gradient, Base 16 prompts, and center align.
+Progress bar colors, prompt theme, and align live under `customize` in `config.yaml`. Interactive mode asks what to edit (`upload` / `download` / `both` / **prompt theme** / **align** / **reset to default**). Color paths open a **centered** HSL picker with a **live 100% preview**. Choosing **both** runs one picker and applies the same stops + longHue to upload and download. **Prompt theme** opens a live-styled list of huh themes (default **Base 16**); moving the cursor restyles the preview. **Align** chooses `left` (default, banner and content flush left) or `center` (banner + content under the banner axis). Use **prev/next** (`[`/`]` or click) between color steps; **`h` / click hex** to type `#RGB`/`#RRGGBB` directly; **`r` / reset** restores the built-in gradient; **`l` / long hue** toggles HSV long-arc blend; Enter applies the current step; Esc saves. Flags take comma-separated `#RGB` / `#RRGGBB`, `--prompt-theme`, `--align`, or `--reset[=upload|download|both]`. Empty / unset uses the built-in gradient, Base 16 prompts, and center align.
 
 ```yaml
 customize:
   promptTheme: base16   # base16 | charm | dracula | catppuccin | default
-  align: center         # left | center (default center)
+  align: left           # left | center (default left)
   upload:
     progressbar:
       colors: ["#3f51b1", "#f18271", "#f7c978"]
@@ -352,7 +352,8 @@ Install a personal DisCloud API on loopback using SQLite and an in-memory cache 
 discloud server install                 # download + configure; does not start
 discloud server start                   # detached; polls /readyz
 discloud server status
-discloud server logs --tail 100
+discloud server logs                    # stream until Ctrl+C
+discloud server logs --follow=false     # one-shot tail
 discloud server stop
 discloud server update                  # restarts only if it was running
 discloud server uninstall               # keeps config/db/logs

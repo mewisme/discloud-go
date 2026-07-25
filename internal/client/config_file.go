@@ -66,14 +66,14 @@ type TransferUIConfig struct {
 const DefaultPromptTheme = "base16"
 
 // DefaultAlign is the UI content alignment when customize.align is unset.
-const DefaultAlign = "center"
+const DefaultAlign = "left"
 
 // CustomizeConfig holds CLI UI/UX customization.
 type CustomizeConfig struct {
 	Upload      *TransferUIConfig `yaml:"upload,omitempty" json:"upload,omitempty"`
 	Download    *TransferUIConfig `yaml:"download,omitempty" json:"download,omitempty"`
 	PromptTheme string            `yaml:"promptTheme,omitempty" json:"promptTheme,omitempty"` // base16|charm|dracula|catppuccin|default
-	Align       string            `yaml:"align,omitempty" json:"align,omitempty"`             // left|center (default center)
+	Align       string            `yaml:"align,omitempty" json:"align,omitempty"`             // left|center (default left)
 }
 
 // NormalizePromptTheme validates and normalizes a huh prompt theme id.
@@ -104,8 +104,10 @@ func (c CustomizeConfig) PromptThemeOrDefault() string {
 func NormalizeAlign(s string) (string, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
-	case "", "center", "centre":
+	case "":
 		return DefaultAlign, nil
+	case "center", "centre":
+		return "center", nil
 	case "left":
 		return "left", nil
 	default:

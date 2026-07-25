@@ -110,7 +110,7 @@ Before every self-managed upload, the CLI rechecks the guild premium tier and ad
 | Field | Description |
 | --- | --- |
 | `promptTheme` | Huh form theme: `base16` (default), `charm`, `dracula`, `catppuccin`, `default` |
-| `align` | Banner + tables + prompts: `center` (default) or `left` |
+| `align` | Banner + tables + prompts: `left` (default) or `center` |
 | `upload.progressbar.colors` | Hex stops for upload progress gradient |
 | `upload.progressbar.longHue` | HSV long-arc blend between upload stops |
 | `download.progressbar.colors` | Hex stops for download progress gradient |

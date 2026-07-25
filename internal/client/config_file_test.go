@@ -240,7 +240,7 @@ func TestNormalizeAlign(t *testing.T) {
 		in, want string
 		ok       bool
 	}{
-		{"", "center", true},
+		{"", "left", true},
 		{"CENTER", "center", true},
 		{"centre", "center", true},
 		{"left", "left", true},
