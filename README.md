@@ -13,7 +13,7 @@ Self-hosted file host that stores files as Discord attachments (fixed **8 MiB*
 - Public/private files, password shares, download limits, access-token rotation (server-managed)
 - Cookie sessions and personal API tokens (`dc_…`); first user on a fresh DB is `admin`
 - Compose stack: API + web + Postgres 18 + Valkey 8
-- CLI via instance `/install.sh` · `/install.ps1`, [get.mewis.me](https://get.mewis.me/discloud.sh), Scoop, or Homebrew
+- CLI via API `/install.sh` · `/install.ps1`, [get.mewis.me](https://get.mewis.me/discloud.sh), Scoop, or Homebrew
 
 ## Architecture
 
@@ -63,11 +63,11 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 
 ## CLI installation
 
-From a running instance (web proxy):
+From a running API:
 
 ```bash
-curl -fsSL http://localhost:3000/install.sh | sh   # macOS / Linux
-irm http://localhost:3000/install.ps1 | iex        # Windows
+curl -fsSL http://localhost:6373/install.sh | sh   # macOS / Linux
+irm http://localhost:6373/install.ps1 | iex        # Windows
 ```
 
 Public installer:

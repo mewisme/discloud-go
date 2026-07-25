@@ -4,11 +4,11 @@ The released client command is **`discloud`** (Scoop/Homebrew shim). The built b
 
 ## Install
 
-From a running DisCloud instance (proxied via the web app or API):
+From a running API:
 
 ```bash
-curl -fsSL http://localhost:3000/install.sh | sh   # macOS / Linux
-irm http://localhost:3000/install.ps1 | iex        # Windows
+curl -fsSL http://localhost:6373/install.sh | sh   # macOS / Linux
+irm http://localhost:6373/install.ps1 | iex        # Windows
 ```
 
 Public installer (or use):

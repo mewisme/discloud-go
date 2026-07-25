@@ -148,11 +148,10 @@ export default function DocsPage() {
             install writes them to the CLI config file (env still overrides).
           </SectionIntro>
           <SectionLabel>Install · macOS / Linux</SectionLabel>
-          <DocsCode>{`curl -fsSL $WEB/install.sh | sh
-# pin: DISCLOUD_VERSION=v0.1.0 curl -fsSL $WEB/install.sh | sh
-# (or API directly: curl -fsSL $BASE/install.sh | sh)`}</DocsCode>
+          <DocsCode>{`curl -fsSL $BASE/install.sh | sh
+# pin: DISCLOUD_VERSION=v0.1.0 curl -fsSL $BASE/install.sh | sh`}</DocsCode>
           <SectionLabel>Install · Windows (PowerShell)</SectionLabel>
-          <DocsCode>{`irm $WEB/install.ps1 | iex`}</DocsCode>
+          <DocsCode>{`irm $BASE/install.ps1 | iex`}</DocsCode>
           <SectionLabel>Scoop / Homebrew</SectionLabel>
           <DocsCode>{`scoop bucket add mew https://github.com/mewisme/scoop-mew
 scoop install mew/discloud-cli
@@ -166,9 +165,9 @@ discloud files list
 discloud get <id> --download --out video.mp4
 discloud config                     # show base / origin / cookie path`}</DocsCode>
           <p className="text-sm text-muted-foreground">
-            UI origin proxies installers (
-            <code className="font-mono text-foreground">$WEB/install.sh</code>
-            → API). Scripts still bake{" "}
+            Install from the API (
+            <code className="font-mono text-foreground">$BASE/install.sh</code>
+            ). Scripts bake{" "}
             <code className="font-mono text-foreground">DISCLOUD_BASE</code> /{" "}
             <code className="font-mono text-foreground">DISCLOUD_ORIGIN</code>{" "}
             from the API. After install,{" "}
