@@ -1,6 +1,8 @@
 // Command discloud-cli is the DisCloud API client.
 package main
 
+//go:generate go run github.com/tc-hib/go-winres@v0.3.3 simply --arch amd64,arm64 --icon ../../icon.png --out rsrc --product-name "DisCloud CLI" --file-description "DisCloud API client" --original-filename discloud-cli.exe --manifest cli
+
 import (
 	"os"
 
