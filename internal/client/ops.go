@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,6 +103,10 @@ type DownloadOptions struct {
 	Token    string
 	Password string
 	OutPath  string // empty → return bytes / write stdout by caller
+	// Progress reports bytes copied; total is Content-Length when known (else 0).
+	Progress func(sent, total int64)
+	// Context cancels the body read when cancelled (e.g. Ctrl+C / Esc).
+	Context context.Context
 }
 
 // Download fetches a file (or JSON metadata). If OutPath is set, writes there and returns nil body.
@@ -136,16 +141,59 @@ func (c *Client) Download(id string, opt DownloadOptions) ([]byte, error) {
 		b, _ := io.ReadAll(res.Body)
 		return nil, &Error{Status: res.StatusCode, Message: string(b)}
 	}
+
+	var total int64
+	if cl := res.Header.Get("Content-Length"); cl != "" {
+		if n, err := strconv.ParseInt(cl, 10, 64); err == nil && n >= 0 {
+			total = n
+		}
+	}
+	ctx := opt.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	body := io.Reader(res.Body)
+	if opt.Progress != nil || opt.Context != nil {
+		if opt.Progress != nil {
+			opt.Progress(0, total)
+		}
+		body = &progressReader{r: res.Body, total: total, report: opt.Progress, ctx: ctx}
+	}
+
 	if opt.OutPath != "" {
 		f, err := os.Create(opt.OutPath)
 		if err != nil {
 			return nil, err
 		}
 		defer f.Close()
-		_, err = io.Copy(f, res.Body)
+		_, err = io.Copy(f, body)
 		return nil, err
 	}
-	return io.ReadAll(res.Body)
+	return io.ReadAll(body)
+}
+
+type progressReader struct {
+	r      io.Reader
+	total  int64
+	sent   int64
+	report func(sent, total int64)
+	ctx    context.Context
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	if p.ctx != nil {
+		if err := p.ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.sent += int64(n)
+		if p.report != nil {
+			p.report(p.sent, p.total)
+		}
+	}
+	return n, err
 }
 
 // ChunkExists reports whether the server has this SHA-256 chunk (HEAD).

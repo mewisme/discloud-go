@@ -57,7 +57,16 @@ Persist `/data` in Docker so auto-generated secrets survive restarts. Changing `
 
 ## Discord data
 
-Delete, cancel, revoke, and expiry cleanup **do not** remove Discord attachments. Treat Discord as durable blob storage outside your control. Do not store secrets in uploaded files if Discord retention is unacceptable for your threat model.
+Delete, cancel, revoke, and expiry cleanup **do not** remove Discord attachments (server-managed path). Treat Discord as durable blob storage outside your control. Do not store secrets in uploaded files if Discord retention is unacceptable for your threat model.
+
+Self-managed CLI `files delete` can delete Discord messages for selected bundle chunks when bot tokens match the bundle config identity. Config identity is only a matching mechanism, not proof of Discord authorization by itself.
+
+### Self-managed bundles
+
+- Bot tokens are never stored in `.discloud` files (only a SHA-256 config identity of guild + channel + token hashes).
+- Password mode: Argon2id + XChaCha20-Poly1305; password and derived keys are never stored.
+- Keyless mode: portable obfuscation with HMAC integrity — **not** secure encryption; any compatible DisCloud CLI can decode it.
+- Restrictive file permissions (`0600`) on config and bundles; atomic writes.
 
 ## Optional CAPTCHA
 

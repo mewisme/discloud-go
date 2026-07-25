@@ -118,3 +118,7 @@ The API runs periodic cleanup (~hourly):
 - Marks abandoned open upload sessions as `expired`
 
 See [architecture.md](architecture.md).
+
+## CLI self-managed uploads
+
+Operators who use `discloud upload --mode self` store Discord bot tokens in the user `config.yaml` (`selfUpload`), separate from the API server's `DISCLOUD_BOT_TOKEN`. Keep those tokens out of shell history (`config set self-upload` prompts). Bundle downloads require the same guild/channel/token set (order-independent identity hash). See [cli.md](cli.md) and [configuration.md](configuration.md).

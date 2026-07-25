@@ -22,14 +22,16 @@ type Config struct {
 	BaseURL    string // API origin, e.g. http://localhost:8080
 	Origin     string // must match server DISCLOUD_CORS for CSRF, e.g. http://localhost:3000
 	CookiePath string // cookie jar file; empty → default path
-	Token      string // personal access token (Bearer); env DISCLOUD_TOKEN / config.json
+	Token      string // personal access token (Bearer); env DISCLOUD_TOKEN / config.yaml
 }
 
 // DefaultConfig resolves settings in order:
-// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN / DISCLOUD_TOKEN) → config.json → localhost defaults.
+// process env (DISCLOUD_BASE / DISCLOUD_ORIGIN / DISCLOUD_TOKEN) → config.yaml → localhost defaults.
 // CLI flags (--base / --origin) override after this when set by the caller.
 // Auth priority at request time: session cookie jar > Token (env/config).
+// Legacy config.json is migrated to config.yaml automatically when present.
 func DefaultConfig() Config {
+	_ = EnsureConfigMigrated()
 	envBase := os.Getenv("DISCLOUD_BASE")
 	envOrigin := os.Getenv("DISCLOUD_ORIGIN")
 	envToken := os.Getenv("DISCLOUD_TOKEN")
@@ -71,94 +73,6 @@ func defaultConfigDir() string {
 
 func defaultCookiePath() string {
 	return filepath.Join(defaultConfigDir(), "cookies")
-}
-
-// ConfigFilePath is the user config.json path (may not exist yet).
-func ConfigFilePath() string {
-	return filepath.Join(defaultConfigDir(), "config.json")
-}
-
-type configFile struct {
-	Base   string `json:"base"`
-	Origin string `json:"origin"`
-	Token  string `json:"token,omitempty"`
-}
-
-func loadConfigFile() (base, origin, token string) {
-	data, err := os.ReadFile(ConfigFilePath())
-	if err != nil {
-		return "", "", ""
-	}
-	var f configFile
-	if json.Unmarshal(data, &f) != nil {
-		return "", "", ""
-	}
-	return f.Base, f.Origin, f.Token
-}
-
-// SaveConfigFile merges non-empty base/origin into config.json and writes it.
-// Empty fields keep the previous file values (or stay empty). Token is preserved.
-// Returns the path and the values that were written.
-func SaveConfigFile(base, origin string) (path, savedBase, savedOrigin string, err error) {
-	path, savedBase, savedOrigin, _, err = SaveConfigFileOpts(base, origin, "", false)
-	return path, savedBase, savedOrigin, err
-}
-
-// SaveConfigFileOpts is SaveConfigFile plus optional token update.
-// When setToken is true, token is written as-is (empty clears the stored token).
-func SaveConfigFileOpts(base, origin, token string, setToken bool) (path, savedBase, savedOrigin, savedToken string, err error) {
-	path = ConfigFilePath()
-	curBase, curOrigin, curToken := loadConfigFile()
-	f := configFile{
-		Base:   firstNonEmpty(strings.TrimRight(strings.TrimSpace(base), "/"), curBase),
-		Origin: firstNonEmpty(strings.TrimRight(strings.TrimSpace(origin), "/"), curOrigin),
-		Token:  curToken,
-	}
-	if setToken {
-		f.Token = strings.TrimSpace(token)
-	}
-	if f.Base == "" && f.Origin == "" && !setToken {
-		return "", "", "", "", fmt.Errorf("nothing to write: pass --base and/or --origin")
-	}
-	if err := writeConfigFile(path, f); err != nil {
-		return "", "", "", "", err
-	}
-	return path, f.Base, f.Origin, f.Token, nil
-}
-
-// UnsetConfigFile clears the named fields in config.json (others kept).
-func UnsetConfigFile(clearBase, clearOrigin, clearToken bool) (path string, err error) {
-	if !clearBase && !clearOrigin && !clearToken {
-		return "", fmt.Errorf("nothing to unset: pass base, origin, and/or token")
-	}
-	path = ConfigFilePath()
-	curBase, curOrigin, curToken := loadConfigFile()
-	f := configFile{Base: curBase, Origin: curOrigin, Token: curToken}
-	if clearBase {
-		f.Base = ""
-	}
-	if clearOrigin {
-		f.Origin = ""
-	}
-	if clearToken {
-		f.Token = ""
-	}
-	if err := writeConfigFile(path, f); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func writeConfigFile(path string, f configFile) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
 }
 
 type Error struct {
@@ -226,7 +140,7 @@ func (c *Client) hasSessionCookie() bool {
 }
 
 // useBearer is true when a PAT should be sent. Session cookie in the jar wins
-// over Token from env/config.json (jar > config).
+// over Token from env/config.yaml (jar > config).
 func (c *Client) useBearer() bool {
 	if c.hasSessionCookie() {
 		return false

@@ -52,7 +52,7 @@ func TestProgressStatusTransitions(t *testing.T) {
 		{Name: "a.bin", Total: 100},
 		{Name: "b.bin", Total: 100},
 	}
-	m := newProgressModel(files, NewProgressLayout([]string{"a.bin", "b.bin"}), 120, nil)
+	m := newProgressModel(files, NewProgressLayout([]string{"a.bin", "b.bin"}), 120, nil, "Uploading")
 	if m.rows[0].status != statusWaiting || m.rows[1].status != statusWaiting {
 		t.Fatal("expected Waiting")
 	}
@@ -106,7 +106,7 @@ func TestProgressViewColumnAlignment(t *testing.T) {
 		files[i] = ProgressFile{Name: n, Total: int64((i + 1) * 1024 * 1024)}
 	}
 	layout := NewProgressLayoutSized(names, 24)
-	m := newProgressModel(files, layout, 140, nil)
+	m := newProgressModel(files, layout, 140, nil, "Uploading")
 	_, _ = m.Update(fileProgressMsg{id: 0, sent: 0})
 	_, _ = m.Update(fileProgressMsg{id: 1, sent: files[1].Total / 2})
 	_, _ = m.Update(fileDoneMsg{id: 2})

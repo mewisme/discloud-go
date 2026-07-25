@@ -17,6 +17,8 @@ DisCloud keeps metadata, auth, retention, and download URLs in your stack, and s
 | `internal/client` | Shared HTTP client for the CLI |
 | `internal/integrity` | Whole-file digests (`discloud-sha256-v1`) |
 | `internal/config` | Environment configuration |
+| `internal/transfer` | Self-managed chunk size / hashing helpers |
+| `internal/selfmanaged` | `.discloud` bundles (encode/decode, identity, crypto) |
 
 ```mermaid
 flowchart LR
@@ -26,7 +28,11 @@ flowchart LR
   api --> discord[Discord_API]
   clients -->|download_redirect_or_proxy| cdn[Discord_CDN]
   api --> cdn
+  cliSelf[CLI_self_mode] --> discord
+  cliSelf --> bundle[".discloud_bundle"]
 ```
+
+Server-managed uploads still use fixed 8 MiB chunks via the API. Self-managed CLI uploads talk to Discord directly and store retrieval metadata in a local `.discloud` bundle (variable chunk size up to the guild tier limit).
 
 ## Domain model
 

@@ -39,5 +39,6 @@ pnpm-debug.log*
 .note*
 
 *.bin
+*.discloud
 
 plans/

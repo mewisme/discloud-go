@@ -7,6 +7,7 @@ Self-hosted file host that stores files as Discord attachments (fixed **8 MiB*
 ## Features
 
 - Content-addressed chunks and resumable upload sessions (web IndexedDB + CLI checkpoints)
+- Optional **self-managed** CLI mode: upload/download directly to Discord via portable `.discloud` bundles
 - Public/private files, password shares, download limits, access-token rotation
 - Cookie sessions and personal API tokens (`dc_…`); first user on a fresh DB is `admin`
 - Compose stack: API + web + Postgres 18 + Valkey 8

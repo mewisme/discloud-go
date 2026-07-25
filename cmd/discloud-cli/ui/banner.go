@@ -12,7 +12,8 @@ import (
 var JSON bool
 
 // cliBanner lines are left-aligned to each other; centerLines pads the whole block.
-const cliBanner = `██████╗ ██╗███████╗ ██████╗██╗      ██████╗ ██╗   ██╗██████╗
+const cliBanner = `
+██████╗ ██╗███████╗ ██████╗██╗      ██████╗ ██╗   ██╗██████╗
 ██╔══██╗██║██╔════╝██╔════╝██║     ██╔═══██╗██║   ██║██╔══██╗
 ██║  ██║██║███████╗██║     ██║     ██║   ██║██║   ██║██║  ██║
 ██║  ██║██║╚════██║██║     ██║     ██║   ██║██║   ██║██║  ██║
@@ -31,18 +32,47 @@ func PrintHeader(cmd *cobra.Command) {
 			return
 		}
 	}
+	ClearAndPrintBanner()
+}
+
+// ClearAndPrintBanner clears the TTY and reprints the banner (same as CLI start).
+// Call after an inline TUI exits so the banner stays on screen.
+func ClearAndPrintBanner() {
+	if JSON {
+		return
+	}
 	if IsTTY(os.Stderr) {
 		// Clear screen + move cursor home (works in Windows Terminal / modern consoles).
 		fmt.Fprint(os.Stderr, "\033[2J\033[H")
 	}
-	text := centerLines(cliBanner, termWidth(os.Stderr))
+	fmt.Fprint(os.Stderr, FormatBanner(termWidth(os.Stderr)))
+}
+
+// FormatBanner returns the centered DISCLOUD banner block for the given width
+// (including leading blank lines). Used by PrintHeader and embedded TUIs.
+func FormatBanner(width int) string {
+	var b strings.Builder
+	b.WriteByte('\n')
+	b.WriteByte('\n')
+	text := centerLines(cliBanner, width)
 	if ColorOn(os.Stderr) {
 		text = Dim(true, text)
 	}
-	fmt.Fprint(os.Stderr, text)
+	b.WriteString(text)
 	if !strings.HasSuffix(text, "\n") {
-		fmt.Fprintln(os.Stderr)
+		b.WriteByte('\n')
 	}
+	return b.String()
+}
+
+// BannerHeight is how many terminal rows FormatBanner occupies at width.
+func BannerHeight(width int) int {
+	s := FormatBanner(width)
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }
 
 // centerLines centers the whole block using one shared left pad from the widest line.

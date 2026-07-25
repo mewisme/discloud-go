@@ -28,3 +28,12 @@ Or compare against a local digest computed with the same algorithm (`FileSHA256F
 - Complete bodies may send `fileSha256` as a hint; mismatch → **400**.
 - Legacy rows may omit `sha256` (null until re-uploaded).
 - Downloads set `X-Content-SHA256` and `Digest: sha-256=…` (base64 of the raw digest) when the digest is known.
+
+## Self-managed `.discloud` bundles
+
+Self-managed uploads store a whole-file SHA-256 of the raw file bytes (same as `sha256sum`) plus per-chunk SHA-256 in the bundle metadata. Bundle containers also carry integrity tags (HMAC for obfuscated mode; Poly1305 for password mode).
+
+```bash
+discloud files verify ./backup.discloud
+discloud files verify ./restored.bin ./backup.discloud --file restored.bin
+```

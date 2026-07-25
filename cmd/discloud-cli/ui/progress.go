@@ -19,7 +19,7 @@ import (
 const (
 	defaultMaxNameWidth = 24
 	defaultTermWidth    = 80
-	statusColWidth      = 10
+	statusColWidth      = 12 // fits "Downloading"
 	sentColWidth        = 10
 	totalColWidth       = 10
 	pctColWidth         = 4
@@ -139,10 +139,13 @@ const (
 	statusAborted
 )
 
-func (s fileStatus) label() string {
+func (s fileStatus) label(active string) string {
 	switch s {
 	case statusUploading:
-		return "Uploading"
+		if active == "" {
+			return "Uploading"
+		}
+		return active
 	case statusComplete:
 		return "Complete"
 	case statusAborted:
@@ -178,8 +181,9 @@ type fileRow struct {
 }
 
 type fileProgressMsg struct {
-	id   int
-	sent int64
+	id    int
+	sent  int64
+	total int64 // >0 updates row total (server Content-Length)
 }
 
 type fileDoneMsg struct{ id int }
@@ -194,23 +198,28 @@ type hideProgressMsg struct{}
 type userCancelMsg struct{}
 
 type progressModel struct {
-	rows     []fileRow
-	layout   ProgressLayout
-	width    int
-	barWidth int
-	quitting bool
-	cancel   context.CancelFunc
+	rows        []fileRow
+	layout      ProgressLayout
+	width       int
+	barWidth    int
+	quitting    bool
+	cancel      context.CancelFunc
+	activeLabel string // in-progress status text: "Uploading" / "Downloading"
 }
 
-func newProgressModel(files []ProgressFile, layout ProgressLayout, termWidth int, cancel context.CancelFunc) *progressModel {
+func newProgressModel(files []ProgressFile, layout ProgressLayout, termWidth int, cancel context.CancelFunc, activeLabel string) *progressModel {
 	if termWidth < 1 {
 		termWidth = defaultTermWidth
 	}
+	if activeLabel == "" {
+		activeLabel = "Uploading"
+	}
 	m := &progressModel{
-		rows:   make([]fileRow, len(files)),
-		layout: layout,
-		width:  termWidth,
-		cancel: cancel,
+		rows:        make([]fileRow, len(files)),
+		layout:      layout,
+		width:       termWidth,
+		cancel:      cancel,
+		activeLabel: activeLabel,
 	}
 	m.recalcBarWidth()
 	for i, f := range files {
@@ -307,6 +316,9 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.sent = 0
 		}
 		r.sent = msg.sent
+		if msg.total > 0 {
+			r.total = msg.total
+		}
 	case fileDoneMsg:
 		if msg.id < 0 || msg.id >= len(m.rows) {
 			return m, nil
@@ -374,7 +386,7 @@ func (m *progressModel) renderRow(i int) string {
 	return fmt.Sprintf("%s %s  %s  %s  %s / %s  %s  %s",
 		r.status.statusIcon(),
 		fitName(r.name, m.layout.NameWidth),
-		padRightWidth(r.status.label(), statusColWidth),
+		padRightWidth(r.status.label(m.activeLabel), statusColWidth),
 		bar,
 		sent,
 		total,
@@ -417,6 +429,15 @@ type FileBar struct {
 // NewUploadProgress starts an inline Bubble Tea progress UI on w (stderr if nil).
 // Ctrl+C / Esc cancels Context() so callers can stop the upload.
 func NewUploadProgress(w io.Writer, files []ProgressFile) *UploadProgress {
+	return newTransferProgress(w, files, "Uploading")
+}
+
+// NewDownloadProgress is NewUploadProgress with a "Downloading" status label.
+func NewDownloadProgress(w io.Writer, files []ProgressFile) *UploadProgress {
+	return newTransferProgress(w, files, "Downloading")
+}
+
+func newTransferProgress(w io.Writer, files []ProgressFile, activeLabel string) *UploadProgress {
 	if w == nil {
 		w = os.Stderr
 	}
@@ -427,7 +448,7 @@ func NewUploadProgress(w io.Writer, files []ProgressFile) *UploadProgress {
 	layout := NewProgressLayout(names)
 	termW := progressTermWidth(w)
 	ctx, cancel := context.WithCancel(context.Background())
-	m := newProgressModel(files, layout, termW, cancel)
+	m := newProgressModel(files, layout, termW, cancel, activeLabel)
 	p := tea.NewProgram(m,
 		tea.WithOutput(w),
 		// Must read the TTY: Bubble Tea queries DEC modes 2026/2027 and the
@@ -491,7 +512,7 @@ func (u *UploadProgress) Wait() {
 	})
 }
 
-func (f *FileBar) Update(sent, _ int64) {
+func (f *FileBar) Update(sent, total int64) {
 	if f == nil || f.p == nil {
 		return
 	}
@@ -503,7 +524,10 @@ func (f *FileBar) Update(sent, _ int64) {
 	if sent < 0 {
 		sent = 0
 	}
-	f.p.Send(fileProgressMsg{id: f.id, sent: sent})
+	if total > 0 {
+		f.total = total
+	}
+	f.p.Send(fileProgressMsg{id: f.id, sent: sent, total: total})
 }
 
 func (f *FileBar) Done() {

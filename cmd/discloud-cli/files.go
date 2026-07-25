@@ -35,10 +35,13 @@ func newFilesCmd() *cobra.Command {
 func newFilesListCmd() *cobra.Command {
 	var limit, offset int
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List owned files",
-		Args:  cobra.NoArgs,
+		Use:   "list [bundle.discloud]",
+		Short: "List owned files or files in a .discloud bundle",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && isBundleArg(args[0]) {
+				return filesListBundle(args[0])
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
@@ -105,16 +108,21 @@ func newFilesGetCmd() *cobra.Command {
 
 func newFilesInspectCmd() *cobra.Command {
 	var token string
+	var fileSelectors []string
 	cmd := &cobra.Command{
-		Use:   "inspect [id]",
-		Short: "Inspect file analytics",
+		Use:   "inspect [id-or-bundle]",
+		Short: "Inspect file analytics or a .discloud bundle",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			arg := ui.ArgOrEmpty(args, 0)
+			if isBundleArg(arg) {
+				return filesInspectBundle(arg, fileSelectors)
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
-			id, err := resolveFileID(c, ui.ArgOrEmpty(args, 0))
+			id, err := resolveFileID(c, arg)
 			if err != nil {
 				return err
 			}
@@ -135,40 +143,59 @@ func newFilesInspectCmd() *cobra.Command {
 		}),
 	}
 	cmd.Flags().StringVar(&token, "token", "", "access token for private files")
+	cmd.Flags().StringArrayVar(&fileSelectors, "file", nil, "select bundle file by id or name")
 	return cmd
 }
 
 func newFilesVerifyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "verify <path> <sha256>",
-		Short: "Verify a local file against a discloud-sha256-v1 digest",
-		Args:  cobra.ExactArgs(2),
+	var fileSelectors []string
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "verify <path> [sha256-or-bundle]",
+		Short: "Verify a local digest, a .discloud bundle, or a file against a bundle",
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && isBundleArg(args[0]) {
+				return filesVerifyBundle(args[0], "", fileSelectors, all)
+			}
+			if len(args) == 2 && isBundleArg(args[1]) {
+				return filesVerifyBundle(args[1], args[0], fileSelectors, all)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("usage: verify <path> <sha256> | verify <bundle> | verify <local> <bundle>")
+			}
 			path := args[0]
 			want := strings.TrimSpace(strings.ToLower(args[1]))
-			f, err := os.Open(path)
-			if err != nil {
-				return err
+			// hex digest check
+			if len(want) == 64 {
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				got, err := integrity.FileSHA256FromReader(f)
+				if err != nil {
+					return err
+				}
+				on := ui.ColorOn(os.Stdout)
+				if !strings.EqualFold(got, want) {
+					fmt.Fprintf(os.Stderr, "%s mismatch\n  got  %s\n  want %s\n",
+						ui.Red(on, "verify failed"), got, want)
+					return fmt.Errorf("digest mismatch")
+				}
+				ui.PrintSuccess("%s %s matches %s",
+					ui.IconOK,
+					ui.Bold(on, path),
+					ui.Cyan(on, got),
+				)
+				return nil
 			}
-			defer f.Close()
-			got, err := integrity.FileSHA256FromReader(f)
-			if err != nil {
-				return err
-			}
-			on := ui.ColorOn(os.Stdout)
-			if !strings.EqualFold(got, want) {
-				fmt.Fprintf(os.Stderr, "%s mismatch\n  got  %s\n  want %s\n",
-					ui.Red(on, "verify failed"), got, want)
-				return fmt.Errorf("digest mismatch")
-			}
-			ui.PrintSuccess("%s %s matches %s",
-				ui.IconOK,
-				ui.Bold(on, path),
-				ui.Cyan(on, got),
-			)
-			return nil
+			return fmt.Errorf("usage: verify <path> <sha256> | verify <bundle> | verify <local> <bundle>")
 		}),
 	}
+	cmd.Flags().StringArrayVar(&fileSelectors, "file", nil, "select bundle file by id or name")
+	cmd.Flags().BoolVar(&all, "all", false, "verify all files in bundle (structure only when no local path)")
+	return cmd
 }
 
 func newFilesVisibilityCmd() *cobra.Command {
@@ -178,6 +205,9 @@ func newFilesVisibilityCmd() *cobra.Command {
 		Short: "Set file visibility",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && isBundleArg(args[0]) {
+				return errServerOnly()
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
@@ -277,6 +307,9 @@ func newFilesShareCmd() *cobra.Command {
 		Short: "Update share settings (password, expiry, download cap, mode)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && isBundleArg(args[0]) {
+				return errServerOnly()
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
@@ -361,6 +394,9 @@ func newFilesRevokeCmd() *cobra.Command {
 		Short: "Force-expire a share without deleting the file row",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && isBundleArg(args[0]) {
+				return errServerOnly()
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
@@ -398,6 +434,9 @@ func newFilesRotateTokenCmd() *cobra.Command {
 		Short: "Rotate private-file access token",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && isBundleArg(args[0]) {
+				return errServerOnly()
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
@@ -437,17 +476,24 @@ func newFilesRotateTokenCmd() *cobra.Command {
 }
 
 func newFilesDeleteCmd() *cobra.Command {
-	var yes bool
+	var yes, all, localOnly, keepDataFile bool
+	var fileSelectors []string
+	var password string
+	var passwordStdin bool
 	cmd := &cobra.Command{
-		Use:   "delete [id]",
-		Short: "Delete a file (metadata only)",
+		Use:   "delete [id-or-bundle]",
+		Short: "Delete a server file or files from a .discloud bundle",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
+			arg := ui.ArgOrEmpty(args, 0)
+			if isBundleArg(arg) {
+				return filesDeleteBundle(arg, fileSelectors, all, yes, localOnly, keepDataFile, password, passwordStdin)
+			}
 			c, err := apiClient()
 			if err != nil {
 				return err
 			}
-			id, err := resolveFileID(c, ui.ArgOrEmpty(args, 0))
+			id, err := resolveFileID(c, arg)
 			if err != nil {
 				return err
 			}
@@ -470,6 +516,12 @@ func newFilesDeleteCmd() *cobra.Command {
 		}),
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	cmd.Flags().BoolVar(&all, "all", false, "delete all files in a bundle")
+	cmd.Flags().StringArrayVar(&fileSelectors, "file", nil, "select bundle file by id or name")
+	cmd.Flags().BoolVar(&localOnly, "local-only", false, "update bundle metadata without deleting Discord messages")
+	cmd.Flags().BoolVar(&keepDataFile, "keep-data-file", false, "keep the .discloud file when all entries are removed")
+	cmd.Flags().StringVar(&password, "password", "", "bundle password")
+	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "read bundle password from stdin")
 	return cmd
 }
 

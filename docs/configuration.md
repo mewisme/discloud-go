@@ -60,8 +60,19 @@ docker compose up -d --force-recreate api web
 | `DISCLOUD_ORIGIN` | Must match server `DISCLOUD_CORS` (CSRF) when using cookie login |
 | `DISCLOUD_TOKEN` | Personal access token (`dc_…`). Used only when the session cookie jar is empty |
 
-Resolution order: env → `config.json` → `http://localhost:8080` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. Session cookie jar wins over `DISCLOUD_TOKEN`. See [cli.md](cli.md).
+Resolution order: env → `config.yaml` → `http://localhost:8080` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. Session cookie jar wins over `DISCLOUD_TOKEN`. Legacy `config.json` migrates automatically to `config.yaml`. See [cli.md](cli.md).
 
+### Self-upload (`selfUpload` in `config.yaml`)
+
+| Field | Description |
+| --- | --- |
+| `botTokens` | Discord bot tokens (array). Order does not affect config identity. |
+| `guildId` | Guild ID (string) used for premium-tier checks |
+| `channelId` | Channel ID (string) for chunk uploads |
+| `premiumTier` | Cached guild premium tier `0`–`3` (refreshed before each self upload) |
+| `chunkSize` | Preferred chunk size in **bytes** (UI prompts use MB = MiB) |
+
+Before every self-managed upload, the CLI rechecks the guild premium tier and adjusts the effective chunk size when necessary.
 ## Fixed product limits (not env)
 
 | Limit | Value |

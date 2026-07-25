@@ -77,14 +77,18 @@ func (c *Client) TokenCount() int { return len(c.bots) }
 type message struct {
 	ID          string `json:"id"`
 	Attachments []struct {
-		URL string `json:"url"`
+		ID   string `json:"id"`
+		URL  string `json:"url"`
+		Name string `json:"filename"`
 	} `json:"attachments"`
 }
 
 // UploadResult is a Discord message attachment written by one bot token.
 type UploadResult struct {
-	MessageID string
-	BotID     int // token slot index (matches store.bots.id)
+	MessageID    string
+	AttachmentID string
+	Filename     string
+	BotID        int // token slot index (matches store.bots.id)
 }
 
 // UploadChunk posts data as a message attachment. Successive calls rotate
@@ -103,7 +107,13 @@ func (c *Client) UploadChunk(ctx context.Context, fileName string, data []byte) 
 			if len(msg.Attachments) == 0 {
 				return UploadResult{}, fmt.Errorf("discord: message %s has no attachments", msg.ID)
 			}
-			return UploadResult{MessageID: msg.ID, BotID: botID}, nil
+			att := msg.Attachments[0]
+			return UploadResult{
+				MessageID:    msg.ID,
+				AttachmentID: att.ID,
+				Filename:     att.Name,
+				BotID:        botID,
+			}, nil
 		}
 		if retryAfter <= 0 || attempt >= maxAttempts {
 			return UploadResult{}, err
