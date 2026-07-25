@@ -50,6 +50,7 @@ func newRootCmd() *cobra.Command {
 		newHealthCmd(),
 		newReadyCmd(),
 		newConfigCmd(),
+		newServerCmd(),
 		newVersionCmd(),
 	)
 	return cmd

@@ -1,4 +1,4 @@
-package store
+package pgx
 
 import (
 	"context"
@@ -6,30 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mewisme/discloud-go/internal/store"
 )
 
-// API token scopes.
-const (
-	ScopeUpload = "upload"
-	ScopeRead   = "read"
-	ScopeManage = "manage"
-	ScopeAdmin  = "admin"
-)
-
-// APIToken is a personal access token row (hash only; raw shown once at create).
-type APIToken struct {
-	ID         string
-	UserID     string
-	Name       string
-	TokenHash  string
-	Scopes     []string
-	ExpiresAt  *time.Time
-	RevokedAt  *time.Time
-	LastUsedAt *time.Time
-	CreatedAt  time.Time
-}
-
-func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
+func (s *Store) CreateAPIToken(ctx context.Context, t store.APIToken) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO api_tokens (id, user_id, name, token_hash, scopes, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -39,19 +20,19 @@ func (s *Store) CreateAPIToken(ctx context.Context, t APIToken) error {
 
 // GetAPITokenByHash returns an active (non-revoked) token by hash.
 // Caller checks expiry against now.
-func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (APIToken, error) {
+func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (store.APIToken, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, user_id, name, token_hash, scopes, expires_at, revoked_at, last_used_at, created_at
 		FROM api_tokens WHERE token_hash = $1`, tokenHash)
 	t, err := scanAPIToken(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return APIToken{}, ErrNotFound
+		return store.APIToken{}, store.ErrNotFound
 	}
 	return t, err
 }
 
 // ListAPITokensByUser returns non-revoked tokens for a user, newest first.
-func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]APIToken, error) {
+func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]store.APIToken, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, user_id, name, token_hash, scopes, expires_at, revoked_at, last_used_at, created_at
 		FROM api_tokens
@@ -60,7 +41,7 @@ func (s *Store) ListAPITokensByUser(ctx context.Context, userID string) ([]APITo
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (APIToken, error) {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.APIToken, error) {
 		return scanAPIToken(row)
 	})
 }
@@ -73,7 +54,7 @@ func (s *Store) RevokeAPIToken(ctx context.Context, id, userID string, now time.
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -101,16 +82,16 @@ func (s *Store) CountAPITokensByUser(ctx context.Context, userID string) (int64,
 	return n, err
 }
 
-func scanAPIToken(row scannable) (APIToken, error) {
-	var t APIToken
+func scanAPIToken(row scannable) (store.APIToken, error) {
+	var t store.APIToken
 	var userID string
 	err := row.Scan(&t.ID, &userID, &t.Name, &t.TokenHash, &t.Scopes,
 		&t.ExpiresAt, &t.RevokedAt, &t.LastUsedAt, &t.CreatedAt)
 	if err != nil {
-		return APIToken{}, err
+		return store.APIToken{}, err
 	}
-	t.ID = uuidHex(t.ID)
-	t.UserID = uuidHex(userID)
+	t.ID = store.UuidHex(t.ID)
+	t.UserID = store.UuidHex(userID)
 	if t.Scopes == nil {
 		t.Scopes = []string{}
 	}

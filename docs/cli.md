@@ -85,6 +85,15 @@ discloud                                    (--base, --origin, --json, -v/--vers
 │   └── overview
 ├── health
 ├── ready
+├── server
+│   ├── install                             (--version, -y/--yes)
+│   ├── update                              (--version, -y/--yes)
+│   ├── uninstall                           (--purge, -y/--yes)
+│   ├── start | stop | restart
+│   ├── status                              (--show-secret)
+│   ├── logs                                (--tail, -f/--follow)
+│   ├── version
+│   └── config                              (show | get | set | unset | path)
 ├── config
 │   ├── get
 │   ├── set [token]                         (--base, --origin, --token, --clear-token)
@@ -334,6 +343,34 @@ discloud ready
 discloud --json health
 discloud --json ready
 ```
+
+## Local server
+
+Install a personal DisCloud API on loopback using SQLite and an in-memory cache (Valkey optional). **No OS services** — the CLI manages a detached process via PID metadata.
+
+```bash
+discloud server install                 # download + configure; does not start
+discloud server start                   # detached; polls /readyz
+discloud server status
+discloud server logs --tail 100
+discloud server stop
+discloud server update                  # restarts only if it was running
+discloud server uninstall               # keeps config/db/logs
+discloud server uninstall --purge -y    # deletes everything
+```
+
+Layout:
+
+| Path | Role |
+| --- | --- |
+| `…/server/config/server.yaml` + `.env` | Canonical config (survives updates) |
+| `…/server/versions/vX.Y.Z/discloud-server` | Versioned binary (renamed from release `discloud`) |
+| `…/server/current/` | Active binary + config presentation |
+| Data dir `discloud.db`, `.app.secret`, `run/`, `logs/` | Persistent data (not inside version dirs) |
+
+Unix install dir: `~/.discloud/server`. Windows: `%LOCALAPPDATA%\discloud\server`. Data: `$XDG_DATA_HOME/discloud` or `~/.local/share/discloud` (Windows `%LOCALAPPDATA%\discloud`).
+
+`discloud server start` always sets absolute `DISCLOUD_CONFIG_DIR` (the `current` directory) and `DISCLOUD_DATA_DIR`. Precedence: process env > `.env` > `server.yaml` > defaults.
 
 ### Completion
 

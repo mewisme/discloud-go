@@ -1,29 +1,16 @@
-package store
+package pgx
 
 import (
 	"context"
 	"time"
-)
 
-// AdminOverview is instance-wide ops aggregates for GET /api/admin/overview.
-type AdminOverview struct {
-	FileCount       int64
-	TotalBytes      int64
-	ChunkStoreCount int64
-	UserCount       int64
-	AdminCount      int64
-	OpenSessions    int64
-	Completed24h    int64
-	Expired24h      int64
-	Cancelled24h    int64
-	Downloads       int64 // lifetime SUM(files.downloads)
-	BytesServed     int64 // lifetime SUM(files.bytes_served)
-}
+	"github.com/mewisme/discloud-go/internal/store"
+)
 
 // AdminOverview returns storage/user/upload/traffic aggregates in one round-trip.
 // since bounds the upload session 24h counters (updated_at >= since).
-func (s *Store) AdminOverview(ctx context.Context, since time.Time) (AdminOverview, error) {
-	var o AdminOverview
+func (s *Store) AdminOverview(ctx context.Context, since time.Time) (store.AdminOverview, error) {
+	var o store.AdminOverview
 	err := s.pool.QueryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*)::bigint FROM files),

@@ -1,4 +1,4 @@
-package store
+package pgx
 
 import (
 	"context"
@@ -7,37 +7,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mewisme/discloud-go/internal/store"
 )
-
-// Event kinds recorded for inspect analytics.
-const (
-	EventView     = "view"
-	EventDownload = "download"
-	EventRange    = "range"
-)
-
-// Event is one access to a file.
-type Event struct {
-	FileID      string
-	Kind        string
-	Bytes       int64
-	VisitorHash string
-}
-
-// FileInspect is the inspect payload (without share URLs — server adds those).
-type FileInspect struct {
-	File
-	Views          int64      `json:"views"`
-	Downloads      int64      `json:"downloads"`
-	Ranges         int64      `json:"ranges"`
-	BytesServed    int64      `json:"bytesServed"`
-	UniqueVisitors int64      `json:"uniqueVisitors"`
-	LastAccessAt   *time.Time `json:"lastAccessAt,omitempty"`
-	ChunkCount     int        `json:"chunkCount"`
-}
 
 // RecordEvent bumps counters and tracks unique visitors.
-func (s *Store) RecordEvent(ctx context.Context, e Event) error {
+func (s *Store) RecordEvent(ctx context.Context, e store.Event) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -59,7 +34,7 @@ func (s *Store) RecordEvent(ctx context.Context, e Event) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 
 	if e.VisitorHash != "" {
@@ -82,11 +57,11 @@ func (s *Store) RecordEvent(ctx context.Context, e Event) error {
 
 func kindColumn(kind string) string {
 	switch kind {
-	case EventView:
+	case store.EventView:
 		return "views"
-	case EventDownload:
+	case store.EventDownload:
 		return "downloads"
-	case EventRange:
+	case store.EventRange:
 		return "ranges"
 	default:
 		return ""
@@ -94,13 +69,13 @@ func kindColumn(kind string) string {
 }
 
 // GetFileInspect loads file meta and access counters.
-func (s *Store) GetFileInspect(ctx context.Context, id string) (FileInspect, error) {
+func (s *Store) GetFileInspect(ctx context.Context, id string) (store.FileInspect, error) {
 	f, err := s.GetFile(ctx, id)
 	if err != nil {
-		return FileInspect{}, err
+		return store.FileInspect{}, err
 	}
 
-	var out FileInspect
+	var out store.FileInspect
 	out.File = f
 	out.ChunkCount = len(f.Parts)
 
@@ -111,10 +86,10 @@ func (s *Store) GetFileInspect(ctx context.Context, id string) (FileInspect, err
 		Scan(&out.Views, &out.Downloads, &out.Ranges,
 			&out.BytesServed, &out.UniqueVisitors, &lastAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return FileInspect{}, ErrNotFound
+		return store.FileInspect{}, store.ErrNotFound
 	}
 	if err != nil {
-		return FileInspect{}, err
+		return store.FileInspect{}, err
 	}
 	out.LastAccessAt = lastAccess
 	return out, nil

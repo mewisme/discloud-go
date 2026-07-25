@@ -1,4 +1,4 @@
-package store
+package pgx
 
 import (
 	"context"
@@ -6,23 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mewisme/discloud-go/internal/store"
 )
 
-// ErrDownloadLimit is returned when a share download cap is exhausted.
-var ErrDownloadLimit = errors.New("download limit reached")
-
-// FileSharePatch is a partial update for share settings. Nil fields are unchanged.
-// ClearPassword / ClearMaxDownloads force-clear even when the companion pointer is nil.
-type FileSharePatch struct {
-	PasswordHash      *string // set hash; use ClearPassword to remove
-	ClearPassword     bool
-	ExpiresAt         *time.Time // set absolute expiry
-	MaxDownloads      *int       // set cap
-	ClearMaxDownloads bool       // unlimited
-	ShareMode         *string
-}
-
-func (s *Store) UpdateFileShare(ctx context.Context, id string, p FileSharePatch) error {
+func (s *Store) UpdateFileShare(ctx context.Context, id string, p store.FileSharePatch) error {
 	f, err := s.GetFile(ctx, id)
 	if err != nil {
 		return err
@@ -52,7 +40,7 @@ func (s *Store) UpdateFileShare(ctx context.Context, id string, p FileSharePatch
 
 	mode := f.ShareMode
 	if mode == "" {
-		mode = ShareModeDownload
+		mode = store.ShareModeDownload
 	}
 	if p.ShareMode != nil {
 		mode = *p.ShareMode
@@ -78,7 +66,7 @@ func (s *Store) UpdateFileShare(ctx context.Context, id string, p FileSharePatch
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -91,13 +79,13 @@ func (s *Store) IncrementDownloadCount(ctx context.Context, id string) error {
 	err := s.pool.QueryRow(ctx, `
 		SELECT max_downloads, download_count FROM files WHERE id = $1`, id).Scan(&max, &count)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
 	if max != nil && count >= *max {
-		return ErrDownloadLimit
+		return store.ErrDownloadLimit
 	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE files
@@ -109,7 +97,7 @@ func (s *Store) IncrementDownloadCount(ctx context.Context, id string) error {
 	}
 	if tag.RowsAffected() == 0 {
 		// Race: another request hit the cap between SELECT and UPDATE.
-		return ErrDownloadLimit
+		return store.ErrDownloadLimit
 	}
 	return nil
 }
@@ -123,7 +111,7 @@ func (s *Store) RevokeFile(ctx context.Context, id string, now time.Time) error 
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }

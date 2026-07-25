@@ -1,55 +1,21 @@
-// Package store persists file metadata in PostgreSQL.
-package store
+// Package pgx persists file metadata in PostgreSQL.
+package pgx
 
 import (
 	"context"
 	"embed"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-// uuidHex normalizes a Postgres uuid text scan (dashed) to 32-char lowercase hex.
-func uuidHex(s string) string {
-	return strings.ReplaceAll(s, "-", "")
-}
+	"github.com/mewisme/discloud-go/internal/store"
+)
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
-
-// ErrNotFound is returned when a file id does not exist.
-var ErrNotFound = errors.New("file not found")
-
-// FilePart is one Discord attachment that makes up a stored file.
-type FilePart struct {
-	MessageID string
-	BotID     int // token slot; -1 if unknown (legacy)
-}
-
-// File is a stored file: its metadata plus the ordered Discord parts.
-type File struct {
-	ID                   string     `json:"fileId"`
-	Name                 string     `json:"fileName"`
-	Size                 int64      `json:"fileSize"`
-	ChunkSize            int64      `json:"chunkSize"`
-	CreatedAt            time.Time  `json:"createdAt"`
-	OwnerUserID          *string    `json:"ownerUserId,omitempty"`
-	Visibility           string     `json:"visibility"`
-	Status               string     `json:"status"`
-	AccessTokenHash      string     `json:"-"`
-	AccessTokenRotatedAt *time.Time `json:"-"`
-	ExpiresAt            time.Time  `json:"expiresAt"`
-	PasswordHash         string     `json:"-"`
-	MaxDownloads         *int       `json:"maxDownloads,omitempty"`
-	DownloadCount        int        `json:"downloadCount"`
-	ShareMode            string     `json:"shareMode"`
-	SHA256               string     `json:"sha256,omitempty"` // discloud-sha256-v1; empty for legacy
-	Parts                []FilePart `json:"-"`
-}
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -122,7 +88,7 @@ func (s *Store) EnsureBots(ctx context.Context, count int) error {
 }
 
 // CreateFile inserts the file row and its chunk rows in one transaction.
-func (s *Store) CreateFile(ctx context.Context, f File) error {
+func (s *Store) CreateFile(ctx context.Context, f store.File) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -131,11 +97,11 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 
 	vis := f.Visibility
 	if vis == "" {
-		vis = VisibilityPublic
+		vis = store.VisibilityPublic
 	}
 	status := f.Status
 	if status == "" {
-		status = FileStatusReady
+		status = store.FileStatusReady
 	}
 	var tokenHash any
 	if f.AccessTokenHash != "" {
@@ -172,7 +138,7 @@ func (s *Store) CreateFile(ctx context.Context, f File) error {
 	return tx.Commit(ctx)
 }
 
-func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
+func (s *Store) GetFile(ctx context.Context, id string) (store.File, error) {
 	row := s.pool.QueryRow(ctx, `
 				SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
 				       access_token_hash, access_token_rotated_at, expires_at,
@@ -180,21 +146,21 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 				FROM files WHERE id = $1`, id)
 	f, err := scanFileMeta(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return File{}, ErrNotFound
+		return store.File{}, store.ErrNotFound
 	}
 	if err != nil {
-		return File{}, err
+		return store.File{}, err
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT message_id, bot_id FROM chunks WHERE file_id = $1 ORDER BY idx`, id)
 	if err != nil {
-		return File{}, err
+		return store.File{}, err
 	}
-	f.Parts, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (FilePart, error) {
-		var p FilePart
+	f.Parts, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.FilePart, error) {
+		var p store.FilePart
 		var bot *int
 		if err := row.Scan(&p.MessageID, &bot); err != nil {
-			return FilePart{}, err
+			return store.FilePart{}, err
 		}
 		if bot != nil {
 			p.BotID = *bot
@@ -209,9 +175,9 @@ func (s *Store) GetFile(ctx context.Context, id string) (File, error) {
 // FindFileByNameAndParts returns an unexpired file owned by ownerUserID with the
 // same name and ordered Discord message_id list. ownerUserID must be set; other
 // users' files are never matched.
-func (s *Store) FindFileByNameAndParts(ctx context.Context, ownerUserID *string, name string, messageIDs []string, now time.Time) (File, error) {
+func (s *Store) FindFileByNameAndParts(ctx context.Context, ownerUserID *string, name string, messageIDs []string, now time.Time) (store.File, error) {
 	if ownerUserID == nil || *ownerUserID == "" || len(messageIDs) == 0 {
-		return File{}, ErrNotFound
+		return store.File{}, store.ErrNotFound
 	}
 	var id string
 	err := s.pool.QueryRow(ctx, `
@@ -227,20 +193,20 @@ func (s *Store) FindFileByNameAndParts(ctx context.Context, ownerUserID *string,
 		ORDER BY f.created_at DESC, f.id DESC
 		LIMIT 1`, name, *ownerUserID, now, messageIDs).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return File{}, ErrNotFound
+		return store.File{}, store.ErrNotFound
 	}
 	if err != nil {
-		return File{}, err
+		return store.File{}, err
 	}
-	return s.GetFile(ctx, uuidHex(id))
+	return s.GetFile(ctx, store.UuidHex(id))
 }
 
 type scannable interface {
 	Scan(dest ...any) error
 }
 
-func scanFileMeta(row scannable) (File, error) {
-	var f File
+func scanFileMeta(row scannable) (store.File, error) {
+	var f store.File
 	var owner *string
 	var tokenHash *string
 	var rotated *time.Time
@@ -251,11 +217,11 @@ func scanFileMeta(row scannable) (File, error) {
 		&owner, &f.Visibility, &f.Status, &tokenHash, &rotated, &f.ExpiresAt,
 		&pwHash, &maxDL, &f.DownloadCount, &f.ShareMode, &sha)
 	if err != nil {
-		return File{}, err
+		return store.File{}, err
 	}
-	f.ID = uuidHex(f.ID)
+	f.ID = store.UuidHex(f.ID)
 	if owner != nil {
-		h := uuidHex(*owner)
+		h := store.UuidHex(*owner)
 		f.OwnerUserID = &h
 	}
 	if tokenHash != nil {
@@ -270,10 +236,10 @@ func scanFileMeta(row scannable) (File, error) {
 		f.SHA256 = *sha
 	}
 	if f.Status == "" {
-		f.Status = FileStatusReady
+		f.Status = store.FileStatusReady
 	}
 	if f.ShareMode == "" {
-		f.ShareMode = ShareModeDownload
+		f.ShareMode = store.ShareModeDownload
 	}
 	return f, nil
 }
@@ -285,17 +251,9 @@ func (s *Store) UpdateFileStatus(ctx context.Context, id, status string) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
-}
-
-// Chunk is one entry in the content-addressed chunk store.
-type Chunk struct {
-	Hash      string
-	MessageID string
-	BotID     int // token slot; -1 if unknown
-	Size      int64
 }
 
 func (s *Store) HasChunk(ctx context.Context, hash string) (bool, error) {
@@ -306,7 +264,7 @@ func (s *Store) HasChunk(ctx context.Context, hash string) (bool, error) {
 }
 
 // PutChunk records an uploaded chunk; concurrent duplicate uploads are benign.
-func (s *Store) PutChunk(ctx context.Context, c Chunk) error {
+func (s *Store) PutChunk(ctx context.Context, c store.Chunk) error {
 	var bot any
 	if c.BotID >= 0 {
 		bot = c.BotID
@@ -326,18 +284,18 @@ func (s *Store) DeleteChunksByMessageID(ctx context.Context, messageID string) e
 
 // GetChunks resolves hashes to stored chunks; missing hashes are absent from
 // the returned map.
-func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chunk, error) {
+func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]store.Chunk, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT hash, message_id, bot_id, size FROM chunk_store WHERE hash = ANY($1)`, hashes)
 	if err != nil {
 		return nil, err
 	}
-	chunks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Chunk, error) {
-		var c Chunk
+	chunks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.Chunk, error) {
+		var c store.Chunk
 		var bot *int
 		err := row.Scan(&c.Hash, &c.MessageID, &bot, &c.Size)
 		if err != nil {
-			return Chunk{}, err
+			return store.Chunk{}, err
 		}
 		if bot != nil {
 			c.BotID = *bot
@@ -349,14 +307,14 @@ func (s *Store) GetChunks(ctx context.Context, hashes []string) (map[string]Chun
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]Chunk, len(chunks))
+	out := make(map[string]store.Chunk, len(chunks))
 	for _, c := range chunks {
 		out[c.Hash] = c
 	}
 	return out, nil
 }
 
-func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]File, error) {
+func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, offset int) ([]store.File, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, size, chunk_size, created_at, owner_user_id, visibility, status,
 		       access_token_hash, access_token_rotated_at, expires_at,
@@ -368,7 +326,7 @@ func (s *Store) ListFilesByOwner(ctx context.Context, ownerID string, limit, off
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (File, error) {
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (store.File, error) {
 		return scanFileMeta(row)
 	})
 }

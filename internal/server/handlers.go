@@ -15,11 +15,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/mewisme/discloud-go/internal/auth"
 	"github.com/mewisme/discloud-go/internal/discord"
+	"github.com/mewisme/discloud-go/internal/ids"
 	"github.com/mewisme/discloud-go/internal/integrity"
 	"github.com/mewisme/discloud-go/internal/store"
 )
@@ -656,22 +656,10 @@ func fileLinks(base, fileID, fileName string, fileSize int64) map[string]any {
 	}
 }
 
-func newID() string {
-	id, err := uuid.NewV7()
-	if err != nil {
-		panic(err) // NewV7 only fails if rand fails
-	}
-	return hex.EncodeToString(id[:])
-}
+func newID() string { return ids.New() }
 
 // parseID accepts dashed or hex UUID forms and returns 32-char lowercase hex.
-func parseID(s string) (string, error) {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(id[:]), nil
-}
+func parseID(s string) (string, error) { return ids.Parse(s) }
 
 var errInvalidID = errors.New("invalid file id")
 

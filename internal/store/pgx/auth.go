@@ -1,4 +1,4 @@
-package store
+package pgx
 
 import (
 	"context"
@@ -8,89 +8,32 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/mewisme/discloud-go/internal/store"
 )
-
-// Role values for users.role.
-const (
-	RoleAdmin = "admin"
-	RoleUser  = "user"
-)
-
-// Visibility values for files.visibility.
-const (
-	VisibilityPublic  = "public"
-	VisibilityPrivate = "private"
-)
-
-// File status values for files.status (upload outcome badge).
-const (
-	FileStatusReady  = "ready"
-	FileStatusReused = "reused"
-)
-
-// ShareMode values for files.share_mode.
-const (
-	ShareModeDownload = "download"
-	ShareModeView     = "view"
-)
-
-// ErrConflict is returned for unique constraint violations (e.g. username).
-var ErrConflict = errors.New("conflict")
-
-// User is an account row.
-type User struct {
-	ID                string    `json:"id"`
-	Username          string    `json:"username"`
-	PasswordHash      string    `json:"-"`
-	Role              string    `json:"role"`
-	DefaultVisibility string    `json:"defaultVisibility"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
-	PasswordChangedAt time.Time `json:"passwordChangedAt"`
-}
-
-// Session is a login session; TokenHash is never JSON-encoded by callers.
-type Session struct {
-	ID         string
-	UserID     string
-	TokenHash  string
-	ExpiresAt  time.Time
-	CreatedAt  time.Time
-	UserAgent  string
-	IP         string
-	LastSeenAt time.Time
-}
-
-type OwnerStats struct {
-	FileCount         int64
-	TotalBytes        int64
-	PublicCount       int64
-	PrivateCount      int64
-	ExpiringSoonCount int64
-}
 
 // createUserLock is a fixed advisory lock key for first-user = admin.
 const createUserLock int64 = 0x646973636C6F7564 // "discloud" truncated
 
 // CreateUser inserts a user. The first user in the DB becomes admin (advisory lock).
-func (s *Store) CreateUser(ctx context.Context, id, username, passwordHash string) (User, error) {
+func (s *Store) CreateUser(ctx context.Context, id, username, passwordHash string) (store.User, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, createUserLock); err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
 
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
-	role := RoleUser
+	role := store.RoleUser
 	if count == 0 {
-		role = RoleAdmin
+		role = store.RoleAdmin
 	}
 	now := time.Now().UTC()
 	_, err = tx.Exec(ctx,
@@ -99,55 +42,55 @@ func (s *Store) CreateUser(ctx context.Context, id, username, passwordHash strin
 		id, username, passwordHash, role, now, now, now)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return User{}, ErrConflict
+			return store.User{}, store.ErrConflict
 		}
-		return User{}, err
+		return store.User{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
-	return User{
+	return store.User{
 		ID: id, Username: username, PasswordHash: passwordHash, Role: role,
-		DefaultVisibility: VisibilityPublic,
+		DefaultVisibility: store.VisibilityPublic,
 		CreatedAt:         now, UpdatedAt: now, PasswordChangedAt: now,
 	}, nil
 }
 
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
-	var u User
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (store.User, error) {
+	var u store.User
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, username, password_hash, role, default_visibility, created_at, updated_at, password_changed_at
 		 FROM users WHERE username = $1`, username).
 		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DefaultVisibility,
 			&u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, ErrNotFound
+		return store.User{}, store.ErrNotFound
 	}
 	if err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
-	u.ID = uuidHex(u.ID)
+	u.ID = store.UuidHex(u.ID)
 	return u, nil
 }
 
-func (s *Store) GetUserByID(ctx context.Context, id string) (User, error) {
-	var u User
+func (s *Store) GetUserByID(ctx context.Context, id string) (store.User, error) {
+	var u store.User
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, username, password_hash, role, default_visibility, created_at, updated_at, password_changed_at
 		 FROM users WHERE id = $1`, id).
 		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DefaultVisibility,
 			&u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, ErrNotFound
+		return store.User{}, store.ErrNotFound
 	}
 	if err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
-	u.ID = uuidHex(u.ID)
+	u.ID = store.UuidHex(u.ID)
 	return u, nil
 }
 
-func (s *Store) CreateSession(ctx context.Context, sess Session) error {
+func (s *Store) CreateSession(ctx context.Context, sess store.Session) error {
 	lastSeen := sess.LastSeenAt
 	if lastSeen.IsZero() {
 		lastSeen = sess.CreatedAt
@@ -161,8 +104,8 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 }
 
 // GetUserBySessionHash returns the user for a still-valid session token hash.
-func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash string, now time.Time) (User, error) {
-	var u User
+func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash string, now time.Time) (store.User, error) {
+	var u store.User
 	err := s.pool.QueryRow(ctx, `
 		SELECT u.id, u.username, u.password_hash, u.role, u.default_visibility, u.created_at, u.updated_at, u.password_changed_at
 		FROM sessions s
@@ -171,18 +114,18 @@ func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash string, now 
 		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DefaultVisibility,
 			&u.CreatedAt, &u.UpdatedAt, &u.PasswordChangedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, ErrNotFound
+		return store.User{}, store.ErrNotFound
 	}
 	if err != nil {
-		return User{}, err
+		return store.User{}, err
 	}
-	u.ID = uuidHex(u.ID)
+	u.ID = store.UuidHex(u.ID)
 	return u, nil
 }
 
 // GetSessionByTokenHash returns a still-valid session by token hash.
-func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string, now time.Time) (Session, error) {
-	var sess Session
+func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string, now time.Time) (store.Session, error) {
+	var sess store.Session
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, user_id, token_hash, expires_at, created_at, user_agent, ip, last_seen_at
 		FROM sessions
@@ -190,13 +133,13 @@ func (s *Store) GetSessionByTokenHash(ctx context.Context, tokenHash string, now
 		Scan(&sess.ID, &sess.UserID, &sess.TokenHash, &sess.ExpiresAt, &sess.CreatedAt,
 			&sess.UserAgent, &sess.IP, &sess.LastSeenAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Session{}, ErrNotFound
+		return store.Session{}, store.ErrNotFound
 	}
 	if err != nil {
-		return Session{}, err
+		return store.Session{}, err
 	}
-	sess.ID = uuidHex(sess.ID)
-	sess.UserID = uuidHex(sess.UserID)
+	sess.ID = store.UuidHex(sess.ID)
+	sess.UserID = store.UuidHex(sess.UserID)
 	return sess, nil
 }
 
@@ -209,7 +152,7 @@ func (s *Store) TouchSession(ctx context.Context, tokenHash, ip, userAgent strin
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -235,7 +178,7 @@ func (s *Store) UpdatePasswordHash(ctx context.Context, userID, passwordHash str
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -250,14 +193,14 @@ func (s *Store) UpdateDefaultVisibility(ctx context.Context, userID, visibility 
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
 
-func (s *Store) OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (OwnerStats, error) {
+func (s *Store) OwnerFileStats(ctx context.Context, ownerID string, now time.Time, soonWithin time.Duration) (store.OwnerStats, error) {
 	soon := now.Add(soonWithin)
-	var st OwnerStats
+	var st store.OwnerStats
 	err := s.pool.QueryRow(ctx, `
 		SELECT
 			COUNT(*)::bigint,
@@ -281,7 +224,7 @@ func isUniqueViolation(err error) bool {
 func (s *Store) UpdateVisibility(ctx context.Context, id, visibility string, tokenHash *string, rotatedAt *time.Time) error {
 	var hash any
 	var rotated any
-	if visibility == VisibilityPrivate && tokenHash != nil {
+	if visibility == store.VisibilityPrivate && tokenHash != nil {
 		hash = *tokenHash
 		if rotatedAt != nil {
 			rotated = *rotatedAt
@@ -294,7 +237,7 @@ func (s *Store) UpdateVisibility(ctx context.Context, id, visibility string, tok
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -308,7 +251,7 @@ func (s *Store) RotateAccessToken(ctx context.Context, id, tokenHash string, rot
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -320,7 +263,7 @@ func (s *Store) DeleteFile(ctx context.Context, id string) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -365,7 +308,7 @@ func (s *Store) ExtendExpiration(ctx context.Context, id string, now time.Time, 
 		RETURNING expires_at`,
 		id, fmt.Sprintf("%d seconds", int64(ext.Seconds())), capAt, now).Scan(&expires)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, ErrNotFound
+		return time.Time{}, store.ErrNotFound
 	}
 	return expires, err
 }

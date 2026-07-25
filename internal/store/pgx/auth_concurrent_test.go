@@ -1,4 +1,4 @@
-package store
+package pgx
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mewisme/discloud-go/internal/auth"
+	"github.com/mewisme/discloud-go/internal/store"
 )
 
 // Concurrent first-user → admin under pg_advisory_xact_lock.
@@ -46,7 +47,7 @@ func TestCreateUserConcurrentFirstAdmin(t *testing.T) {
 		t.Fatal(err)
 	}
 	const n = 16
-	results := make([]User, n)
+	results := make([]store.User, n)
 	errs := make([]error, n)
 	var wg sync.WaitGroup
 	base := time.Now().UnixNano()
@@ -67,7 +68,7 @@ func TestCreateUserConcurrentFirstAdmin(t *testing.T) {
 		if errs[i] != nil {
 			t.Fatalf("CreateUser %d: %v", i, errs[i])
 		}
-		if u.Role == RoleAdmin {
+		if u.Role == store.RoleAdmin {
 			admins++
 		}
 	}

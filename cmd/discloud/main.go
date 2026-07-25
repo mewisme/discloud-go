@@ -1,14 +1,18 @@
 // Command discloud runs the DisCloud API server: unlimited cloud storage
-// backed by Discord attachments, with PostgreSQL metadata and Valkey caching.
+// backed by Discord attachments, with PostgreSQL or SQLite metadata and
+// Valkey or in-memory caching.
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,7 +21,9 @@ import (
 	"github.com/mewisme/discloud-go/internal/config"
 	"github.com/mewisme/discloud-go/internal/discord"
 	"github.com/mewisme/discloud-go/internal/server"
-	"github.com/mewisme/discloud-go/internal/store"
+	"github.com/mewisme/discloud-go/internal/serverconfig"
+	pgxstore "github.com/mewisme/discloud-go/internal/store/pgx"
+	sqlitestore "github.com/mewisme/discloud-go/internal/store/sqlite"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -31,10 +37,21 @@ func main() {
 		return
 	}
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(log); err != nil {
+	cfg, err := loadServerConfig()
+	logLevel := slog.LevelInfo
+	if err == nil {
+		logLevel = cfg.SlogLevel()
+	}
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	if err != nil {
 		log.Error("fatal", "error", err)
-		// Exit 0 on bad/missing env so Compose restart:on-failure does not crash-loop.
+		if errors.Is(err, config.ErrInvalid) {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+	if err := run(log, cfg); err != nil {
+		log.Error("fatal", "error", err)
 		if errors.Is(err, config.ErrInvalid) {
 			os.Exit(0)
 		}
@@ -42,35 +59,59 @@ func main() {
 	}
 }
 
-func run(log *slog.Logger) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+func loadServerConfig() (config.Config, error) {
+	sources := config.Sources{
+		Defaults: config.DefaultsMap(),
+		Process:  config.ProcessEnvMap(),
 	}
+	configDir := strings.TrimSpace(os.Getenv("DISCLOUD_CONFIG_DIR"))
+	if configDir == "" {
+		if d, err := config.ResolveConfigDir(); err == nil {
+			if _, err := os.Stat(filepath.Join(d, serverconfig.YAMLName)); err == nil {
+				configDir = d
+			}
+		}
+	}
+	if configDir != "" {
+		if data, err := os.ReadFile(filepath.Join(configDir, serverconfig.YAMLName)); err == nil {
+			var f serverconfig.File
+			if err := serverconfig.UnmarshalYAML(data, &f); err != nil {
+				return config.Config{}, fmt.Errorf("%w: %w", config.ErrInvalid, err)
+			}
+			sources.YAML = serverconfig.EnvMap(f)
+		} else if !os.IsNotExist(err) {
+			return config.Config{}, err
+		}
+		if m, err := serverconfig.ParseDotEnvFile(filepath.Join(configDir, serverconfig.EnvName)); err != nil {
+			return config.Config{}, err
+		} else {
+			sources.DotEnv = m
+		}
+	}
+	return config.LoadFromSources(sources)
+}
 
+func run(log *slog.Logger, cfg config.Config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.New(ctx, cfg.DatabaseURL)
+	st, closer, err := openStore(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	if err := st.Migrate(ctx); err != nil {
-		return err
-	}
+	defer closer()
 
-	ca, err := cache.New(cfg.ValkeyURL)
+	ca, cacheCloser, err := openCache(cfg)
 	if err != nil {
 		return err
 	}
-	defer ca.Close()
+	defer cacheCloser()
 
 	dc := discord.New(cfg.DiscordBotToken, cfg.DiscordChannelID)
 	if err := st.EnsureBots(ctx, dc.TokenCount()); err != nil {
 		return err
 	}
-	salt, err := config.LoadOrCreateVisitorHashSalt(config.VisitorHashSaltFile)
+	salt, err := config.LoadOrCreateVisitorHashSalt(cfg.VisitorSecretPath())
 	if err != nil {
 		return err
 	}
@@ -92,14 +133,20 @@ func run(log *slog.Logger) error {
 	go srv.RunCleanup(ctx)
 
 	httpServer := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              cfg.ListenAddr(),
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("server listening", "port", cfg.Port, "version", version, "discord_bots", dc.TokenCount())
+		log.Info("server listening",
+			"addr", cfg.ListenAddr(),
+			"version", version,
+			"discord_bots", dc.TokenCount(),
+			"store", cfg.StoreBackendName(),
+			"cache", cfg.CacheBackendName(),
+		)
 		if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -114,4 +161,50 @@ func run(log *slog.Logger) error {
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
+}
+
+func openStore(ctx context.Context, cfg config.Config) (server.Store, func(), error) {
+	info, err := config.ParseDatabaseURL(cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", config.ErrInvalid, err)
+	}
+	switch info.Backend {
+	case config.BackendPostgres:
+		st, err := pgxstore.New(ctx, info.DriverDSN)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := st.Migrate(ctx); err != nil {
+			st.Close()
+			return nil, nil, err
+		}
+		return st, st.Close, nil
+	case config.BackendSQLite:
+		st, err := sqlitestore.New(ctx, info.DriverDSN)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := st.Migrate(ctx); err != nil {
+			_ = st.Close()
+			return nil, nil, err
+		}
+		return st, func() { _ = st.Close() }, nil
+	default:
+		return nil, nil, fmt.Errorf("%w: unsupported database backend", config.ErrInvalid)
+	}
+}
+
+func openCache(cfg config.Config) (server.Cache, func(), error) {
+	if cfg.ValkeyURL == "" {
+		if cfg.Backend != config.BackendSQLite {
+			return nil, nil, fmt.Errorf("%w: DISCLOUD_VALKEY_URL is required for PostgreSQL", config.ErrInvalid)
+		}
+		m := cache.NewMemory()
+		return m, m.Close, nil
+	}
+	ca, err := cache.New(cfg.ValkeyURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ca, ca.Close, nil
 }

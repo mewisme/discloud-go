@@ -23,7 +23,8 @@ func PrintError(err error) {
 	b.WriteString(fmt.Sprintf("%s %s", Red(on, IconFail), Bold(on, title)))
 	if detail != "" {
 		b.WriteString("\n")
-		b.WriteString("  " + Dim(on, detail))
+		b.WriteString("  ")
+		b.WriteString(Dim(on, detail))
 	}
 	if hint != "" {
 		b.WriteString("\n")

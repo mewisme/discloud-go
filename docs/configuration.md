@@ -9,10 +9,10 @@ Environment variables for the API server (`cmd/discloud`) and related Compose/we
 | `DISCLOUD_BOT_TOKEN` | One token, or comma-separated tokens for round-robin uploads |
 | `DISCLOUD_CHANNEL_ID` | Channel where attachments are posted |
 | `DISCLOUD_CORS` | Exact browser origin for CORS + cookies (no path/query), e.g. `http://localhost:3000` |
-| `DISCLOUD_DATABASE_URL` | Postgres connection string |
-| `DISCLOUD_VALKEY_URL` | Valkey connection string (`valkey://` or `redis://`) |
+| `DISCLOUD_DATABASE_URL` | Postgres (`postgres://` / `postgresql://`) or SQLite (`sqlite:` / `file:`) |
+| `DISCLOUD_VALKEY_URL` | Required for Postgres (`valkey://` / `redis://`). Optional for SQLite (empty → in-memory cache) |
 
-Compose injects `DISCLOUD_DATABASE_URL` and `DISCLOUD_VALKEY_URL` for containers. Set them yourself for `go run` / `make run`.
+Compose injects Postgres + Valkey URLs for containers. Local `discloud server install` writes a SQLite DSN and leaves Valkey empty.
 
 `DISCLOUD_CORS` using `https` sets the session cookie **Secure** flag.
 
@@ -20,9 +20,13 @@ Compose injects `DISCLOUD_DATABASE_URL` and `DISCLOUD_VALKEY_URL` for containers
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `DISCLOUD_HOST` | empty (all interfaces) | Listen host; local installs use `127.0.0.1` |
 | `DISCLOUD_PORT` | `6373` | Listen port |
 | `DISCLOUD_API_URL` | (derive from request) | Public API origin for share links; **not** the UI URL |
-| `DISCLOUD_APP_SECRET` | auto `.app.secret` | HMAC root (≥32 chars). Env wins over file. Docker: `/data/.app.secret` |
+| `DISCLOUD_APP_SECRET` | auto `.app.secret` | HMAC root (≥32 chars). Env wins over file |
+| `DISCLOUD_DATA_DIR` | (cwd for Docker) | Persistent data dir for DB path defaults, `.app.secret`, `.visitor.secret` |
+| `DISCLOUD_CONFIG_DIR` | (exe dir / unset) | Directory containing `server.yaml` and `.env` |
+| `DISCLOUD_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 | `DISCLOUD_TRUST_PROXY` | off | Honor `X-Forwarded-For` / `X-Real-IP` only behind an edge that strips client values |
 | `DISCLOUD_RL_UPLOAD` | `60` | Upload RL per IP (+ per user when signed in). `0` = off |
 | `DISCLOUD_RL_DOWNLOAD` | `120` | Download RL per IP on `/f/{id}`. `0` = off |
@@ -33,6 +37,33 @@ Compose injects `DISCLOUD_DATABASE_URL` and `DISCLOUD_VALKEY_URL` for containers
 | `DISCLOUD_CAPTCHA_SECRET` | — | Turnstile secret; enables anon upload CAPTCHA when set |
 
 Byte-valued env vars are plain integers (no `GiB` suffix). Empty → default.
+
+### Backend combinations
+
+| Database | Valkey | Result |
+| --- | --- | --- |
+| Postgres | set | Valid (production) |
+| Postgres | empty | Invalid |
+| SQLite | set | Valid |
+| SQLite | empty | Valid → in-memory cache |
+
+Canonical local SQLite DSN: `sqlite:<absolute-path>/discloud.db` (forward slashes in the DSN string).
+
+## Local server
+
+`discloud server install` writes canonical `server.yaml` under the install `config/` directory (beside a presented copy in `current/`). Precedence when the server starts:
+
+```text
+process environment > .env > server.yaml > built-in defaults
+```
+
+Merging does not mutate the parent process environment. CLI-managed starts pass absolute `DISCLOUD_CONFIG_DIR` and `DISCLOUD_DATA_DIR`.
+
+Basic YAML keys: `host`, `port`, `botTokens`, `channelId`, `cors`, `apiUrl`, `logLevel`. Advanced: `databaseUrl`, `valkeyUrl` (CLI: `--database-url` / `--valkey-url`). Never print raw bot tokens without `--show-secret`.
+
+Backup recommendation: copy `<dataDir>/discloud.db` (and `-wal`/`-shm` if present) while the server is stopped.
+
+Docker/Compose PostgreSQL + Valkey production path is unchanged.
 
 ## Compose / web
 
@@ -104,10 +135,11 @@ Set via `discloud config set customize` (interactive or flags). Details: [cli.md
 
 ## Local vs Docker
 
-| Concern | Docker Compose | `go run ./cmd/discloud` |
-| --- | --- | --- |
-| `DISCLOUD_DATABASE_URL` / `DISCLOUD_VALKEY_URL` | Injected | You must set them |
-| Working directory / secrets | `/data` volume → `.app.secret`, `.visitor.secret` | Process cwd |
-| Discord + `DISCLOUD_CORS` | From `.env` | From environment / `.env` you export |
+| Concern | Docker Compose | `discloud server` (local) | `go run ./cmd/discloud` |
+| --- | --- | --- | --- |
+| Database | Postgres (required) | SQLite by default | You set `DISCLOUD_DATABASE_URL` |
+| Cache | Valkey (required) | In-memory if Valkey empty | Valkey required unless SQLite |
+| Bind | all interfaces | `127.0.0.1` by default | `DISCLOUD_HOST` / port |
+| Secrets | `/data` volume | `DISCLOUD_DATA_DIR` | Process cwd unless `DISCLOUD_DATA_DIR` |
 
 See also [operations.md](operations.md) for `DISCLOUD_APP_SECRET` persistence and reverse-proxy notes.

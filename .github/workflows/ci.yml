@@ -19,6 +19,16 @@ jobs:
           if [ -n "$fmt" ]; then echo "gofmt needed on:"; echo "$fmt"; exit 1; fi
       - run: go vet ./...
       - run: go test ./...
+      - name: Cross-compile binaries
+        run: |
+          set -e
+          for goos in linux darwin windows; do
+            for goarch in amd64 arm64; do
+              echo "building $goos/$goarch"
+              CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -o /dev/null ./cmd/discloud
+              CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -o /dev/null ./cmd/discloud-cli
+            done
+          done
 
   frontend:
     runs-on: ubuntu-latest

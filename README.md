@@ -89,6 +89,19 @@ Install scripts default `base`/`origin` to `http://localhost:6373` and `http://l
 
 The released command is `discloud`. The API container entrypoint is `/discloud`. Full command tree and shell completion: [docs/cli.md](docs/cli.md).
 
+## Local server (SQLite, no Docker)
+
+Install and run a personal DisCloud server on loopback with SQLite + in-memory cache (Valkey optional). Process-only lifecycle (no OS services):
+
+```bash
+discloud server install          # downloads release, writes ~/.discloud/server/config
+discloud server start            # detached process; sets DISCLOUD_CONFIG_DIR / DISCLOUD_DATA_DIR
+discloud server status
+discloud server stop
+```
+
+Config lives under `…/server/config/` (survives updates). Data (`discloud.db`, secrets, logs) is under the user data directory. See [docs/cli.md](docs/cli.md#local-server) and [docs/configuration.md](docs/configuration.md#local-server).
+
 ## Basic usage
 
 Web: open http://localhost:3000 — upload files or folders, manage visibility, copy share links. Account at `/me`; inspect at `/i/<file-id>`; admin at `/admin`.

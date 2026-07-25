@@ -25,7 +25,7 @@ func uploadsDir() string {
 }
 
 func checkpointPath(absPath string, size, mtime int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d", absPath, size, mtime)))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%d|%d", absPath, size, mtime))
 	return filepath.Join(uploadsDir(), hex.EncodeToString(sum[:])+".json")
 }
 

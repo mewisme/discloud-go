@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// runHealthcheck GETs local /readyz (Postgres + Valkey). Exit 0 if ready.
+// runHealthcheck GETs local /readyz (database + cache). Exit 0 if ready.
 func runHealthcheck() error {
 	port := os.Getenv("DISCLOUD_PORT")
 	if port == "" {

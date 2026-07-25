@@ -11,9 +11,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/mewisme/discloud-go/internal/userdir"
 )
 
 const sessionCookie = "discloud_session"
@@ -57,18 +58,7 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func defaultConfigDir() string {
-	if runtime.GOOS == "windows" {
-		base := os.Getenv("APPDATA")
-		if base == "" {
-			base = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
-		}
-		return filepath.Join(base, "discloud")
-	}
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "discloud")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "discloud")
+	return userdir.ConfigDir()
 }
 
 func defaultCookiePath() string {

@@ -214,11 +214,11 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.store.Ping(ctx); err != nil {
-		http.Error(w, "postgres unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if err := s.cache.Ping(ctx); err != nil {
-		http.Error(w, "valkey unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "cache unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

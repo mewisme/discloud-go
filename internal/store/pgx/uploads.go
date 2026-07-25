@@ -1,4 +1,4 @@
-package store
+package pgx
 
 import (
 	"context"
@@ -6,43 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mewisme/discloud-go/internal/store"
 )
 
-// Upload session lifecycle statuses (not files.status).
-const (
-	UploadPending    = "pending"
-	UploadUploading  = "uploading"
-	UploadCompleting = "completing"
-	UploadCompleted  = "completed"
-	UploadCancelled  = "cancelled"
-	UploadExpired    = "expired"
-)
-
-// ErrPartConflict is returned when a session part is re-registered with a different hash.
-var ErrPartConflict = errors.New("upload part hash conflict")
-
-// ErrUploadNotActive is returned when mutating a non-open upload session.
-var ErrUploadNotActive = errors.New("upload session not active")
-
-// UploadSession is a resumable upload ledger (bytes live in chunk_store).
-type UploadSession struct {
-	ID                string
-	OwnerUserID       *string
-	ResumeTokenHash   string
-	FileName          string
-	FileSize          int64
-	ChunkSize         int
-	ChunkCount        int
-	Status            string
-	FileID            *string
-	ClientFingerprint string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	ExpiresAt         time.Time
-	Parts             map[int]string // idx → chunk hash (registered only)
-}
-
-func (s *Store) CreateUploadSession(ctx context.Context, u UploadSession) error {
+func (s *Store) CreateUploadSession(ctx context.Context, u store.UploadSession) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO upload_sessions (
 			id, owner_user_id, resume_token_hash, file_name, file_size, chunk_size, chunk_count,
@@ -53,28 +21,28 @@ func (s *Store) CreateUploadSession(ctx context.Context, u UploadSession) error 
 	return err
 }
 
-func (s *Store) GetUploadSession(ctx context.Context, id string) (UploadSession, error) {
+func (s *Store) GetUploadSession(ctx context.Context, id string) (store.UploadSession, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, owner_user_id, resume_token_hash, file_name, file_size, chunk_size, chunk_count,
 		       status, file_id, client_fingerprint, created_at, updated_at, expires_at
 		FROM upload_sessions WHERE id = $1`, id)
 	u, err := scanUploadSession(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return UploadSession{}, ErrNotFound
+		return store.UploadSession{}, store.ErrNotFound
 	}
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
 	parts, err := s.listUploadParts(ctx, u.ID)
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
 	u.Parts = parts
 	return u, nil
 }
 
-func scanUploadSession(row scannable) (UploadSession, error) {
-	var u UploadSession
+func scanUploadSession(row scannable) (store.UploadSession, error) {
+	var u store.UploadSession
 	var owner *string
 	var fileID *string
 	err := row.Scan(
@@ -82,15 +50,15 @@ func scanUploadSession(row scannable) (UploadSession, error) {
 		&u.Status, &fileID, &u.ClientFingerprint, &u.CreatedAt, &u.UpdatedAt, &u.ExpiresAt,
 	)
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
-	u.ID = uuidHex(u.ID)
+	u.ID = store.UuidHex(u.ID)
 	if owner != nil {
-		h := uuidHex(*owner)
+		h := store.UuidHex(*owner)
 		u.OwnerUserID = &h
 	}
 	if fileID != nil {
-		h := uuidHex(*fileID)
+		h := store.UuidHex(*fileID)
 		u.FileID = &h
 	}
 	return u, nil
@@ -162,16 +130,16 @@ func (s *Store) RegisterUploadPart(ctx context.Context, uploadID string, idx int
 		SELECT status, chunk_count FROM upload_sessions WHERE id = $1 FOR UPDATE`, uploadID).
 		Scan(&status, &chunkCount)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if status != UploadPending && status != UploadUploading {
-		return ErrUploadNotActive
+	if status != store.UploadPending && status != store.UploadUploading {
+		return store.ErrUploadNotActive
 	}
 	if idx < 0 || idx >= chunkCount {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 
 	var existing *string
@@ -190,7 +158,7 @@ func (s *Store) RegisterUploadPart(ctx context.Context, uploadID string, idx int
 		}
 	} else if existing != nil && *existing != "" {
 		if *existing != hash {
-			return ErrPartConflict
+			return store.ErrPartConflict
 		}
 	} else {
 		_, err = tx.Exec(ctx,
@@ -203,7 +171,7 @@ func (s *Store) RegisterUploadPart(ctx context.Context, uploadID string, idx int
 
 	_, err = tx.Exec(ctx, `
 		UPDATE upload_sessions SET status = $2, updated_at = $3 WHERE id = $1`,
-		uploadID, UploadUploading, now)
+		uploadID, store.UploadUploading, now)
 	if err != nil {
 		return err
 	}
@@ -212,10 +180,10 @@ func (s *Store) RegisterUploadPart(ctx context.Context, uploadID string, idx int
 
 // BeginUploadComplete transitions pending/uploading → completing.
 // If already completed with file_id, returns the session (idempotent complete).
-func (s *Store) BeginUploadComplete(ctx context.Context, uploadID string, now time.Time) (UploadSession, error) {
+func (s *Store) BeginUploadComplete(ctx context.Context, uploadID string, now time.Time) (store.UploadSession, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
@@ -225,40 +193,40 @@ func (s *Store) BeginUploadComplete(ctx context.Context, uploadID string, now ti
 		FROM upload_sessions WHERE id = $1 FOR UPDATE`, uploadID)
 	u, err := scanUploadSession(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return UploadSession{}, ErrNotFound
+		return store.UploadSession{}, store.ErrNotFound
 	}
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
-	if u.Status == UploadCompleted && u.FileID != nil {
+	if u.Status == store.UploadCompleted && u.FileID != nil {
 		if err := tx.Commit(ctx); err != nil {
-			return UploadSession{}, err
+			return store.UploadSession{}, err
 		}
 		parts, err := s.listUploadParts(ctx, u.ID)
 		if err != nil {
-			return UploadSession{}, err
+			return store.UploadSession{}, err
 		}
 		u.Parts = parts
 		return u, nil
 	}
-	if u.Status != UploadPending && u.Status != UploadUploading {
-		return UploadSession{}, ErrUploadNotActive
+	if u.Status != store.UploadPending && u.Status != store.UploadUploading {
+		return store.UploadSession{}, store.ErrUploadNotActive
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE upload_sessions SET status = $2, updated_at = $3 WHERE id = $1`,
-		uploadID, UploadCompleting, now)
+		uploadID, store.UploadCompleting, now)
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
 	parts, err := s.listUploadParts(ctx, u.ID)
 	if err != nil {
-		return UploadSession{}, err
+		return store.UploadSession{}, err
 	}
 	u.Parts = parts
-	u.Status = UploadCompleting
+	u.Status = store.UploadCompleting
 	u.UpdatedAt = now
 	return u, nil
 }
@@ -269,12 +237,12 @@ func (s *Store) FinishUploadComplete(ctx context.Context, uploadID, fileID strin
 		UPDATE upload_sessions
 		SET status = $2, file_id = $3::uuid, updated_at = $4
 		WHERE id = $1 AND status = $5`,
-		uploadID, UploadCompleted, fileID, now, UploadCompleting)
+		uploadID, store.UploadCompleted, fileID, now, store.UploadCompleting)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+		return store.ErrNotFound
 	}
 	return nil
 }
@@ -284,7 +252,7 @@ func (s *Store) AbortUploadComplete(ctx context.Context, uploadID string, now ti
 	_, err := s.pool.Exec(ctx, `
 		UPDATE upload_sessions SET status = $2, updated_at = $3
 		WHERE id = $1 AND status = $4`,
-		uploadID, UploadUploading, now, UploadCompleting)
+		uploadID, store.UploadUploading, now, store.UploadCompleting)
 	return err
 }
 
@@ -293,7 +261,7 @@ func (s *Store) CancelUploadSession(ctx context.Context, uploadID string, now ti
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE upload_sessions SET status = $2, updated_at = $3
 		WHERE id = $1 AND status IN ('pending', 'uploading')`,
-		uploadID, UploadCancelled, now)
+		uploadID, store.UploadCancelled, now)
 	if err != nil {
 		return err
 	}
@@ -301,12 +269,12 @@ func (s *Store) CancelUploadSession(ctx context.Context, uploadID string, now ti
 		var status string
 		err := s.pool.QueryRow(ctx, `SELECT status FROM upload_sessions WHERE id = $1`, uploadID).Scan(&status)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
+			return store.ErrNotFound
 		}
 		if err != nil {
 			return err
 		}
-		return ErrUploadNotActive
+		return store.ErrUploadNotActive
 	}
 	return nil
 }
@@ -321,7 +289,7 @@ func (s *Store) ExpireUploadSessions(ctx context.Context, now time.Time, limit i
 			WHERE expires_at <= $2 AND status IN ('pending', 'uploading')
 			ORDER BY expires_at
 			LIMIT $3
-		)`, UploadExpired, now, limit)
+		)`, store.UploadExpired, now, limit)
 	if err != nil {
 		return 0, err
 	}
