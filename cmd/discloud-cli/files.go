@@ -173,7 +173,7 @@ func newFilesVerifyCmd() *cobra.Command {
 					return err
 				}
 				defer f.Close()
-				got, err := integrity.FileSHA256FromReader(f)
+				got, err := integrity.FileSHA256FromReader(f, integrity.DefaultChunkSize)
 				if err != nil {
 					return err
 				}

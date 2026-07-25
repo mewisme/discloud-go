@@ -6,7 +6,7 @@ This is **not** always the same as `sha256sum` of the raw file.
 
 ## Construction
 
-1. Split the file into fixed **8 MiB** chunks (last chunk may be shorter).
+1. Split the file into chunks of the upload’s **stored chunk size** (last chunk may be shorter). Legacy default is **8 MiB** when no guild was configured.
 2. Let `H_i` be the SHA-256 of chunk `i` bytes (hex), and `S_i` its length in bytes.
 3. If there is **one** chunk: digest = `H_0` (same as `sha256sum` of the file).
 4. If there are **two or more** chunks: digest = SHA-256 of the concatenation  
@@ -21,7 +21,7 @@ This is **not** always the same as `sha256sum` of the raw file.
 discloud files verify ./downloaded.bin "$(curl -sS "$API/api/files/$ID" | jq -r .sha256)"
 ```
 
-Or compare against a local digest computed with the same algorithm (`FileSHA256FromReader` / CLI verify). Using plain `sha256sum` is only correct when the file is **≤ 8 MiB** (single chunk).
+Or compare against a local digest computed with the same algorithm (`FileSHA256FromReader(r, chunkSize)` / CLI verify). Using plain `sha256sum` is only correct for **single-chunk** files (size ≤ that file’s chunk size). Multi-chunk verify must use the file’s stored `chunkSize`.
 
 ## API behavior
 

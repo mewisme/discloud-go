@@ -293,6 +293,37 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
   return apiFetch<AdminOverview>("/api/admin/overview");
 }
 
+export type AdminConfigEntry = {
+  key: string;
+  value: string;
+  source: "env" | "db";
+  updatedAt?: string;
+};
+
+export type AdminConfig = {
+  entries: AdminConfigEntry[];
+};
+
+export async function fetchAdminConfig(): Promise<AdminConfig> {
+  return apiFetch<AdminConfig>("/api/admin/config");
+}
+
+export async function putAdminConfig(
+  entries: Record<string, string>,
+): Promise<AdminConfig> {
+  return apiFetch<AdminConfig>("/api/admin/config", {
+    method: "PUT",
+    json: { entries },
+  });
+}
+
+export async function deleteAdminConfigKey(key: string): Promise<AdminConfig> {
+  return apiFetch<AdminConfig>(
+    `/api/admin/config/${encodeURIComponent(key)}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function signUp(username: string, password: string): Promise<AuthUser> {
   return apiFetch<AuthUser>("/api/auth/signup", {
     method: "POST",

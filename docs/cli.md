@@ -373,6 +373,16 @@ Unix install dir: `~/.discloud/server`. Windows: `%LOCALAPPDATA%\discloud\server
 
 `discloud server start` always sets absolute `DISCLOUD_CONFIG_DIR` (the `current` directory) and `DISCLOUD_DATA_DIR`. Precedence: process env > `.env` > `server.yaml` > defaults.
 
+`server.yaml` chunk fields (optional):
+
+```yaml
+guildId: ""       # empty → 8 MiB; set to enable PremiumTier sizing
+chunkSize: 0      # preferred bytes; 0 → tier max when guild set
+premiumTier: 0   # cached after startup resolve
+```
+
+Install may prompt for an optional guild ID. There is no Postgres `config` table on the local SQLite path — use YAML/env only.
+
 ### Completion
 
 | Shell | This session | Permanent |

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,9 @@ type File struct {
 	Port        string   `yaml:"port,omitempty"`
 	BotTokens   []string `yaml:"botTokens,omitempty"`
 	ChannelID   string   `yaml:"channelId,omitempty"`
+	GuildID     string   `yaml:"guildId,omitempty"`
+	ChunkSize   int64    `yaml:"chunkSize,omitempty"` // preferred bytes; 0 → tier max when guild set
+	PremiumTier int      `yaml:"premiumTier,omitempty"`
 	CORS        string   `yaml:"cors,omitempty"`
 	APIURL      string   `yaml:"apiUrl,omitempty"`
 	LogLevel    string   `yaml:"logLevel,omitempty"`
@@ -114,6 +118,12 @@ func Unset(installServerDir string, keys ...string) error {
 			f.BotTokens = nil
 		case "channelid", "channel_id", "channel-id":
 			f.ChannelID = ""
+		case "guildid", "guild_id", "guild-id":
+			f.GuildID = ""
+		case "chunksize", "chunk_size", "chunk-size":
+			f.ChunkSize = 0
+		case "premiumtier", "premium_tier", "premium-tier":
+			f.PremiumTier = 0
 		case "cors":
 			f.CORS = ""
 		case "apiurl", "api_url", "api-url":
@@ -145,6 +155,12 @@ func EnvMap(f File) map[string]string {
 	}
 	if f.ChannelID != "" {
 		out["DISCLOUD_CHANNEL_ID"] = f.ChannelID
+	}
+	if f.GuildID != "" {
+		out["DISCLOUD_GUILD_ID"] = f.GuildID
+	}
+	if f.ChunkSize > 0 {
+		out["DISCLOUD_CHUNK_SIZE"] = strconv.FormatInt(f.ChunkSize, 10)
 	}
 	if f.CORS != "" {
 		out["DISCLOUD_CORS"] = f.CORS
@@ -289,12 +305,19 @@ func normalize(f *File) {
 	f.Host = strings.TrimSpace(f.Host)
 	f.Port = strings.TrimSpace(f.Port)
 	f.ChannelID = strings.TrimSpace(f.ChannelID)
+	f.GuildID = strings.TrimSpace(f.GuildID)
 	f.CORS = strings.TrimRight(strings.TrimSpace(f.CORS), "/")
 	f.APIURL = strings.TrimRight(strings.TrimSpace(f.APIURL), "/")
 	f.LogLevel = strings.ToLower(strings.TrimSpace(f.LogLevel))
 	f.DatabaseURL = strings.TrimSpace(f.DatabaseURL)
 	f.ValkeyURL = strings.TrimSpace(f.ValkeyURL)
 	f.BotTokens = normalizeTokens(f.BotTokens)
+	if f.ChunkSize < 0 {
+		f.ChunkSize = 0
+	}
+	if f.PremiumTier < 0 {
+		f.PremiumTier = 0
+	}
 	if f.APIURL == "" && f.Host != "" && f.Port != "" {
 		host := f.Host
 		if host == "0.0.0.0" || host == "" {
@@ -346,6 +369,18 @@ func Get(f File, key string) (string, error) {
 		return joinTokens(f.BotTokens), nil
 	case "channelid", "channel_id", "channel-id":
 		return f.ChannelID, nil
+	case "guildid", "guild_id", "guild-id":
+		return f.GuildID, nil
+	case "chunksize", "chunk_size", "chunk-size":
+		if f.ChunkSize <= 0 {
+			return "", nil
+		}
+		return strconv.FormatInt(f.ChunkSize, 10), nil
+	case "premiumtier", "premium_tier", "premium-tier":
+		if f.PremiumTier <= 0 {
+			return "", nil
+		}
+		return strconv.Itoa(f.PremiumTier), nil
 	case "cors":
 		return f.CORS, nil
 	case "apiurl", "api_url", "api-url":

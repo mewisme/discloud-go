@@ -149,3 +149,10 @@ type AdminOverview struct {
 	Downloads       int64 // lifetime SUM(files.downloads)
 	BytesServed     int64 // lifetime SUM(files.bytes_served)
 }
+
+// ConfigEntry is one row in the Postgres runtime config table.
+type ConfigEntry struct {
+	Key       string
+	Value     string
+	UpdatedAt time.Time
+}

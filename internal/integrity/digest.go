@@ -1,4 +1,3 @@
-// Package integrity computes DisCloud whole-file digests (discloud-sha256-v1).
 package integrity
 
 import (
@@ -9,8 +8,12 @@ import (
 	"io"
 )
 
-// ChunkSize is the DisCloud chunk size (8 MiB). Used by FileSHA256FromReader.
-const ChunkSize = 8 << 20
+// DefaultChunkSize is the legacy DisCloud chunk size (8 MiB) when no guild
+// PremiumTier override is configured.
+const DefaultChunkSize = 8 << 20
+
+// ChunkSize is an alias for DefaultChunkSize (kept for existing call sites/tests).
+const ChunkSize = DefaultChunkSize
 
 // FileSHA256 computes discloud-sha256-v1 from ordered chunk hashes and sizes.
 //
@@ -48,11 +51,14 @@ func FileSHA256(hashes []string, sizes []int64) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// FileSHA256FromReader splits r into ChunkSize pieces, hashes each, and returns FileSHA256.
-func FileSHA256FromReader(r io.Reader) (string, error) {
+// FileSHA256FromReader splits r into chunkSize pieces, hashes each, and returns FileSHA256.
+func FileSHA256FromReader(r io.Reader, chunkSize int64) (string, error) {
+	if chunkSize <= 0 {
+		return "", fmt.Errorf("integrity: invalid chunk size %d", chunkSize)
+	}
 	var hashes []string
 	var sizes []int64
-	buf := make([]byte, ChunkSize)
+	buf := make([]byte, chunkSize)
 	for {
 		n, err := io.ReadFull(r, buf)
 		if n > 0 {

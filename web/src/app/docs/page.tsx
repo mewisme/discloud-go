@@ -282,10 +282,12 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
         <TabsContent value="upload" className="flex flex-col gap-4">
           <SectionIntro title="Upload">
             One request for small/medium files. Body = raw bytes. Server splits
-            into 8&nbsp;MB chunks. Anonymous uploads are public (7-day
-            retention). Signed-in uploads are owned (30-day retention) and use
-            the account <code>defaultVisibility</code> preference (default
-            public; private returns a one-time <code>accessToken</code>).
+            into chunks sized by <code>GET /api/info</code>{" "}
+            <code>chunkSize</code> (default 8&nbsp;MiB without a guild). Anonymous
+            uploads are public (7-day retention). Signed-in uploads are owned
+            (30-day retention) and use the account{" "}
+            <code>defaultVisibility</code> preference (default public; private
+            returns a one-time <code>accessToken</code>).
           </SectionIntro>
 
           <Endpoint method="POST" path="/api/upload?fileName={name}">
@@ -326,10 +328,11 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
 
         <TabsContent value="chunked" className="flex flex-col gap-4">
           <SectionIntro title="Chunked upload">
-            Any size, resumable. Split into <strong>8&nbsp;MB</strong> pieces
-            (last chunk may be shorter). Each chunk is keyed by SHA-256 — skip
-            uploads the server already has. Send credentials on complete so
-            ownership attaches when signed in.
+            Any size, resumable. Split into pieces of{" "}
+            <code>GET /api/info</code> <code>chunkSize</code> (default
+            8&nbsp;MiB without a guild; last chunk may be shorter). Each chunk
+            is keyed by SHA-256 — skip uploads the server already has. Send
+            credentials on complete so ownership attaches when signed in.
           </SectionIntro>
 
           <Endpoint method="GET/HEAD" path="/api/chunks/{sha256}">
@@ -342,8 +345,9 @@ discloud config                     # show base / origin / cookie path`}</DocsCo
 
           <Endpoint method="POST" path="/api/chunks">
             <p>
-              Upload one chunk (raw body, max 8&nbsp;MB). Hash is computed
-              server-side. <code>existed: true</code> means it was already stored.
+              Upload one chunk (raw body, max = live <code>chunkSize</code> from{" "}
+              <code>/api/info</code>). Hash is computed server-side.{" "}
+              <code>existed: true</code> means it was already stored.
             </p>
             <DocsCode>{`curl -X POST --data-binary @part-aa "$BASE/api/chunks"
 # → { "hash": "2af4eff9…", "existed": false }`}</DocsCode>
@@ -481,9 +485,45 @@ curl -s "$BASE/api/files/<id>?token=<accessToken>"`}</DocsCode>
           </Endpoint>
 
           <Endpoint method="GET" path="/api/info">
-            <p>Public upload sizing (chunk size only).</p>
+            <p>
+              Public upload sizing. <code>chunkSize</code> is the live effective
+              size (8&nbsp;MiB without guild; PremiumTier / preferred when
+              configured). <code>uploads.maxFileSize</code> is{" "}
+              <code>8192 × chunkSize</code>.
+            </p>
             <DocsCode>{`curl -s "$BASE/api/info"
-# { "chunkSize": 8388608 }`}</DocsCode>
+# { "chunkSize": 8388608, "uploads": { "sessions": true, "maxFileSize": … } }`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="GET" path="/api/admin/config">
+            <p>
+              Admin only (Postgres). Merged allowlisted public config with{" "}
+              <code>source: &quot;env&quot; | &quot;db&quot;</code>. SQLite →{" "}
+              <strong>501</strong>.
+            </p>
+            <DocsCode>{`curl -s -H "Origin: http://localhost:3000" -b cookies.txt \\
+  "$BASE/api/admin/config"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="PUT" path="/api/admin/config">
+            <p>
+              Admin only (Postgres). Body{" "}
+              <code>{`{ "entries": { "guild_id": "…", "chunk_size": "0" } }`}</code>{" "}
+              pins DB overrides (env remains default when no row).
+            </p>
+            <DocsCode>{`curl -X PUT -H "Origin: http://localhost:3000" -b cookies.txt \\
+  -H "Content-Type: application/json" \\
+  -d '{"entries":{"guild_id":"123","chunk_size":"0"}}' \\
+  "$BASE/api/admin/config"`}</DocsCode>
+          </Endpoint>
+
+          <Endpoint method="DELETE" path="/api/admin/config/{key}">
+            <p>
+              Admin only (Postgres). Removes a DB pin so the env default applies
+              again.
+            </p>
+            <DocsCode>{`curl -X DELETE -H "Origin: http://localhost:3000" -b cookies.txt \\
+  "$BASE/api/admin/config/guild_id"`}</DocsCode>
           </Endpoint>
         </TabsContent>
 

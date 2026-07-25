@@ -12,10 +12,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/mewisme/discloud-go/internal/appconfig"
 	"github.com/mewisme/discloud-go/internal/auth"
 	"github.com/mewisme/discloud-go/internal/cache"
 	"github.com/mewisme/discloud-go/internal/config"
@@ -115,6 +117,23 @@ func run(log *slog.Logger, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+
+	chunkSize, tier, err := appconfig.ResolveEffectiveChunk(ctx, dc, cfg.DiscordGuildID, cfg.PreferredChunkSize)
+	if err != nil {
+		return fmt.Errorf("resolve chunk size: %w", err)
+	}
+	if cfg.DiscordGuildID != "" {
+		log.Info("premium tier resolved",
+			"guild_id", cfg.DiscordGuildID,
+			"premium_tier", tier,
+			"chunk_size", chunkSize,
+		)
+		persistLocalTier(cfg, tier, cfg.PreferredChunkSize)
+	} else {
+		log.Info("using legacy chunk size (no guild_id)", "chunk_size", chunkSize)
+	}
+
+	useDB := cfg.Backend == config.BackendPostgres
 	srv := server.New(log, st, ca, dc, server.Options{
 		PublicBaseURL:           cfg.APIURL,
 		VisitorSalt:             salt,
@@ -122,6 +141,11 @@ func run(log *slog.Logger, cfg config.Config) error {
 		CookieSecure:            cfg.CookieSecure,
 		TrustProxy:              cfg.TrustProxy,
 		Keys:                    auth.DeriveKeys(cfg.AppSecret),
+		ChunkSize:               chunkSize,
+		GuildID:                 cfg.DiscordGuildID,
+		PreferredChunkSize:      cfg.PreferredChunkSize,
+		UseDBConfig:             useDB,
+		EnvPublic:               envPublicFromConfig(cfg),
 		RateLimitUploadPerMin:   cfg.RateLimitUploadPerMin,
 		RateLimitDownloadPerMin: cfg.RateLimitDownloadPerMin,
 		MaxUserBytes:            cfg.MaxUserBytes,
@@ -130,6 +154,11 @@ func run(log *slog.Logger, cfg config.Config) error {
 		MaxRawUploadBytes:       cfg.MaxRawUploadBytes,
 		CaptchaSecret:           cfg.CaptchaSecret,
 	})
+	if useDB {
+		if err := srv.RefreshPublicConfig(ctx); err != nil {
+			return fmt.Errorf("load public config from database: %w", err)
+		}
+	}
 	go srv.RunCleanup(ctx)
 
 	httpServer := &http.Server{
@@ -161,6 +190,43 @@ func run(log *slog.Logger, cfg config.Config) error {
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
+}
+
+func envPublicFromConfig(cfg config.Config) map[string]string {
+	return map[string]string{
+		appconfig.KeyGuildID:        cfg.DiscordGuildID,
+		appconfig.KeyChunkSize:      strconv.FormatInt(cfg.PreferredChunkSize, 10),
+		appconfig.KeyMaxRawUpload:   strconv.FormatInt(cfg.MaxRawUploadBytes, 10),
+		appconfig.KeyRLUpload:       strconv.Itoa(cfg.RateLimitUploadPerMin),
+		appconfig.KeyRLDownload:     strconv.Itoa(cfg.RateLimitDownloadPerMin),
+		appconfig.KeyMaxUserBytes:   strconv.FormatInt(cfg.MaxUserBytes, 10),
+		appconfig.KeyMaxAnonUploads: strconv.Itoa(cfg.MaxAnonUploadsPerDay),
+		appconfig.KeyMaxAnonBytes:   strconv.FormatInt(cfg.MaxAnonBytesPerDay, 10),
+	}
+}
+
+// persistLocalTier writes premiumTier (and preferred chunkSize if unset) back to server.yaml.
+func persistLocalTier(cfg config.Config, tier int, preferred int64) {
+	if cfg.Backend != config.BackendSQLite {
+		return
+	}
+	configDir := strings.TrimSpace(os.Getenv("DISCLOUD_CONFIG_DIR"))
+	if configDir == "" {
+		return
+	}
+	installRoot := filepath.Dir(configDir)
+	f, err := serverconfig.Load(installRoot)
+	if err != nil {
+		return
+	}
+	f.PremiumTier = tier
+	if f.GuildID == "" {
+		f.GuildID = cfg.DiscordGuildID
+	}
+	if f.ChunkSize <= 0 && preferred > 0 {
+		f.ChunkSize = preferred
+	}
+	_ = serverconfig.Save(installRoot, f)
 }
 
 func openStore(ctx context.Context, cfg config.Config) (server.Store, func(), error) {

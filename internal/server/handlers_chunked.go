@@ -54,10 +54,11 @@ func (s *Server) handleChunkUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.requireUploadRate(w, r) {
 		return
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, chunkSize))
+	cs := s.effectiveChunkSize()
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, cs))
 	if err != nil {
 		writeJSONError(w, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("Chunk must be at most %d bytes", chunkSize))
+			fmt.Sprintf("Chunk must be at most %d bytes", cs))
 		return
 	}
 	if len(data) == 0 {
@@ -132,7 +133,7 @@ func (s *Server) handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Estimate size upper bound for quota (actual size from chunk store at assemble).
-	est := int64(len(req.ChunkHashes)) * chunkSize
+	est := int64(len(req.ChunkHashes)) * s.effectiveChunkSize()
 	if !s.requireQuotaForUpload(w, r, est) {
 		return
 	}

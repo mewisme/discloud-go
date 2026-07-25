@@ -64,7 +64,8 @@ func Merge(s Sources) map[string]string {
 func ProcessEnvMap() map[string]string {
 	keys := []string{
 		"DISCLOUD_HOST", "DISCLOUD_PORT", "DISCLOUD_DATABASE_URL", "DISCLOUD_VALKEY_URL",
-		"DISCLOUD_BOT_TOKEN", "DISCLOUD_CHANNEL_ID", "DISCLOUD_API_URL", "DISCLOUD_APP_SECRET",
+		"DISCLOUD_BOT_TOKEN", "DISCLOUD_CHANNEL_ID", "DISCLOUD_GUILD_ID", "DISCLOUD_CHUNK_SIZE",
+		"DISCLOUD_API_URL", "DISCLOUD_APP_SECRET",
 		"DISCLOUD_CORS", "DISCLOUD_TRUST_PROXY", "DISCLOUD_CAPTCHA_SECRET",
 		"DISCLOUD_RL_UPLOAD", "DISCLOUD_RL_DOWNLOAD", "DISCLOUD_MAX_USER_BYTES",
 		"DISCLOUD_MAX_ANON_UPLOADS", "DISCLOUD_MAX_ANON_BYTES", "DISCLOUD_MAX_RAW_UPLOAD",
@@ -103,6 +104,10 @@ type Config struct {
 	// tokens that divide uploads across bots.
 	DiscordBotToken  string
 	DiscordChannelID string
+	// DiscordGuildID is optional; empty → legacy 8 MiB chunk size.
+	DiscordGuildID string
+	// PreferredChunkSize is optional preferred upload chunk bytes (0 → tier max when guild set).
+	PreferredChunkSize int64
 	// APIURL is used to build share links. When empty, links are
 	// derived from the incoming request's Host and forwarded proto.
 	APIURL string
@@ -204,6 +209,7 @@ func Decode(env map[string]string) (Config, error) {
 		ValkeyURL:        get("DISCLOUD_VALKEY_URL"),
 		DiscordBotToken:  get("DISCLOUD_BOT_TOKEN"),
 		DiscordChannelID: get("DISCLOUD_CHANNEL_ID"),
+		DiscordGuildID:   get("DISCLOUD_GUILD_ID"),
 		APIURL:           get("DISCLOUD_API_URL"),
 		AppSecret:        env["DISCLOUD_APP_SECRET"], // may keep spaces intentionally
 		WebOrigin:        get("DISCLOUD_CORS"),
@@ -257,6 +263,9 @@ func Decode(env map[string]string) (Config, error) {
 	}
 
 	var nErr error
+	if c.PreferredChunkSize, nErr = parseBytes(get("DISCLOUD_CHUNK_SIZE"), 0); nErr != nil {
+		return Config{}, fmt.Errorf("%w: %w", ErrInvalid, nErr)
+	}
 	if c.RateLimitUploadPerMin, nErr = parseInt(get("DISCLOUD_RL_UPLOAD"), 60); nErr != nil {
 		return Config{}, fmt.Errorf("%w: %w", ErrInvalid, nErr)
 	}

@@ -25,7 +25,10 @@ import (
 )
 
 const (
-	chunkSize = 8 << 20 // 8 MB, Discord's attachment limit for bots without nitro boosts
+	// defaultChunkSize is the legacy 8 MiB size when no guild PremiumTier override is set.
+	defaultChunkSize = 8 << 20
+	// chunkSize is the package default used by tests; handlers use s.effectiveChunkSize().
+	chunkSize = defaultChunkSize
 	// rangeWindow caps open-ended Range requests, mirroring the original's
 	// 5 MB windows for media seeking.
 	rangeWindow = 5 << 20
@@ -90,7 +93,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	g, ctx := errgroup.WithContext(r.Context())
 	g.SetLimit(s.discordUploadLimit())
 
-	fileSize, err := forEachChunk(body, chunkSize, func(idx int, data []byte) error {
+	fileSize, err := forEachChunk(body, int(s.effectiveChunkSize()), func(idx int, data []byte) error {
 		if ctx.Err() != nil { // an upload already failed; stop reading
 			return ctx.Err()
 		}
@@ -388,10 +391,7 @@ func (s *Server) streamPart(w http.ResponseWriter, r *http.Request, part store.F
 	if err != nil {
 		return err
 	}
-	partial := span.start > 0 || span.end < chunkSize-1
-	if partial {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", span.start, span.end))
-	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", span.start, span.end))
 	resp, err := s.cdn.Do(req)
 	if err != nil {
 		return err
@@ -502,7 +502,7 @@ func (s *Server) newOwnedFile(r *http.Request, id, name string, size int64, part
 		ID:         id,
 		Name:       name,
 		Size:       size,
-		ChunkSize:  chunkSize,
+		ChunkSize:  s.effectiveChunkSize(),
 		CreatedAt:  now,
 		Visibility: store.VisibilityPublic,
 		Status:     store.FileStatusReady,

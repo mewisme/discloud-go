@@ -512,6 +512,13 @@ func promptServerBasics(opts *localserver.InstallOptions) error {
 		}
 		opts.ChannelID = ch
 	}
+	if strings.TrimSpace(f.GuildID) == "" {
+		g, err := promptArg("", "Discord guild ID (optional, empty = 8 MB chunks)")
+		if err != nil {
+			return err
+		}
+		opts.GuildID = strings.TrimSpace(g)
+	}
 	return nil
 }
 

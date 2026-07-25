@@ -37,7 +37,8 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "fileSize must be positive")
 		return
 	}
-	maxSize := int64(maxChunksPerFile) * chunkSize
+	cs := s.effectiveChunkSize()
+	maxSize := int64(maxChunksPerFile) * cs
 	if req.FileSize > maxSize {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("fileSize exceeds maximum (%d bytes)", maxSize))
 		return
@@ -51,7 +52,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	name := formatFileName(req.FileName)
 
-	chunkCount := int((req.FileSize + chunkSize - 1) / chunkSize)
+	chunkCount := int((req.FileSize + cs - 1) / cs)
 	if chunkCount > maxChunksPerFile {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Too many chunks (max %d)", maxChunksPerFile))
 		return
@@ -105,7 +106,7 @@ func (s *Server) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 		ResumeTokenHash:   s.keys.HashUploadToken(rawToken),
 		FileName:          name,
 		FileSize:          req.FileSize,
-		ChunkSize:         chunkSize,
+		ChunkSize:         int(cs),
 		ChunkCount:        chunkCount,
 		Status:            store.UploadPending,
 		ClientFingerprint: req.ClientFingerprint,
@@ -370,9 +371,9 @@ func (s *Server) assembleFileFromHashes(r *http.Request, fileName string, hashes
 		if !ok {
 			return store.File{}, "", &uploadHTTPError{http.StatusBadRequest, "Unknown chunk hash: " + h}
 		}
-		if i < len(hashes)-1 && c.Size != chunkSize {
+		if i < len(hashes)-1 && c.Size != s.effectiveChunkSize() {
 			return store.File{}, "", &uploadHTTPError{http.StatusBadRequest,
-				fmt.Sprintf("Chunk %d is %d bytes; every chunk except the last must be exactly %d bytes", i, c.Size, chunkSize)}
+				fmt.Sprintf("Chunk %d is %d bytes; every chunk except the last must be exactly %d bytes", i, c.Size, s.effectiveChunkSize())}
 		}
 		fileSize += c.Size
 		sizes[i] = c.Size

@@ -42,9 +42,9 @@ Env `DISCLOUD_APP_SECRET` wins over the file when both are present. Minimum leng
 
 ## What to back up
 
-1. **PostgreSQL** (`discloud-pgdata`) — users, files, chunks index, upload sessions, tokens
+1. **PostgreSQL** (`discloud-pgdata`) — users, files, chunks index, upload sessions, tokens, runtime `config` rows
 2. **API data volume** (`discloud-data`) — `.app.secret`, `.visitor.secret` (unless you inject `DISCLOUD_APP_SECRET` via env and manage visitor salt separately)
-3. Your `.env` / secrets store — Discord tokens, `DISCLOUD_CORS`, `DISCLOUD_API_URL`, optional CAPTCHA keys
+3. Your `.env` / secrets store — Discord tokens, `DISCLOUD_CORS`, `DISCLOUD_API_URL`, optional CAPTCHA keys, optional `DISCLOUD_GUILD_ID`
 
 Valkey is intentionally non-durable; do not rely on it for backup.
 

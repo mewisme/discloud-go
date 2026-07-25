@@ -565,6 +565,22 @@ func (m *memStore) ExtendExpiration(_ context.Context, id string, now time.Time,
 
 func (m *memStore) Ping(context.Context) error { return nil }
 
+func (m *memStore) ListConfig(context.Context) ([]store.ConfigEntry, error) {
+	return nil, store.ErrNotSupported
+}
+func (m *memStore) GetConfig(context.Context, string) (store.ConfigEntry, error) {
+	return store.ConfigEntry{}, store.ErrNotSupported
+}
+func (m *memStore) SetConfig(context.Context, string, string) error {
+	return store.ErrNotSupported
+}
+func (m *memStore) DeleteConfig(context.Context, string) error {
+	return store.ErrNotSupported
+}
+func (m *memStore) SetConfigBatch(context.Context, map[string]string) error {
+	return store.ErrNotSupported
+}
+
 func (m *memStore) AdminOverview(_ context.Context, since time.Time) (store.AdminOverview, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

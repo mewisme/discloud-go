@@ -10,14 +10,15 @@ DisCloud keeps metadata, auth, retention, and download URLs in your stack, and s
 | `cmd/discloud-cli` | Client binary (command name `discloud`) |
 | `web/` | Next.js UI |
 | `internal/server` | Routes, upload/download, auth gates, cleanup |
-| `internal/store` | Postgres metadata + migrations |
+| `internal/store` | Postgres / SQLite metadata + migrations |
 | `internal/discord` | Discord API v10 attachment uploads |
 | `internal/cache` | Valkey: CDN URL cache, rate-limit/quota counters |
 | `internal/auth` | Password hashing, HMAC key derivation |
 | `internal/client` | Shared HTTP client for the CLI |
 | `internal/integrity` | Whole-file digests (`discloud-sha256-v1`) |
 | `internal/config` | Environment configuration |
-| `internal/transfer` | Self-managed chunk size / hashing helpers |
+| `internal/appconfig` | Allowlisted public keys, env+DB merge, PremiumTier chunk resolve |
+| `internal/transfer` | Chunk size / hashing helpers (API + self-managed) |
 | `internal/selfmanaged` | `.discloud` bundles (encode/decode, identity, crypto) |
 
 ```mermaid
@@ -32,7 +33,7 @@ flowchart LR
   cliSelf --> bundle[".discloud_bundle"]
 ```
 
-Server-managed uploads still use fixed 8 MiB chunks via the API. Self-managed CLI uploads talk to Discord directly and store retrieval metadata in a local `.discloud` bundle (variable chunk size up to the guild tier limit).
+Server-managed uploads use an **effective** chunk size from guild Premium Tier when a guild ID is configured; otherwise **8 MiB**. Self-managed CLI uploads talk to Discord directly and store retrieval metadata in a local `.discloud` bundle (same tier rules).
 
 ## Domain model
 
@@ -48,13 +49,29 @@ JSON IDs: file payloads use `fileId`; account and API-token payloads use `id`.
 
 ## Storage and chunking
 
-DisCloud uses fixed **8 MiB** chunks for broad compatibility with Discord attachment uploads.
+Effective upload chunk size (also returned by `GET /api/info`):
+
+| Guild Premium Tier | Max chunk |
+| --- | --- |
+| none / unset guild | **8 MiB** (legacy default) |
+| 0 or 1 | 10 MiB |
+| 2 | 50 MiB |
+| 3 | 100 MiB |
 
 | Limit | Value |
 | --- | --- |
-| Chunk size | 8 MiB (`8388608` bytes) |
+| Preferred size | Optional (`DISCLOUD_CHUNK_SIZE` / `chunkSize` / DB `chunk_size`); `0` → tier max when guild set |
 | Max chunks per file | 8192 |
-| Effective max file size | ~64 GiB (`8192 × 8 MiB`) |
+| Effective max file size | `8192 × effectiveChunkSize` (legacy ≈ 64 GiB at 8 MiB) |
+
+**Where guild / preferred size come from**
+
+| Path | Source |
+| --- | --- |
+| Docker / Postgres | Env defaults; DB `config` row wins per key; Admin UI / `PUT /api/admin/config` |
+| Local SQLite | `server.yaml` `guildId` / `chunkSize` (mapped to env at load) |
+
+Each stored file keeps its own `chunk_size` from upload time; changing the live setting only affects **new** uploads.
 
 ### Content addressing
 
@@ -119,6 +136,6 @@ Compose disables AOF/RDB on purpose. After a Valkey restart, CDN URLs rebuild on
 | `/files` | Owned file management |
 | `/i/{id}` | File inspect / share settings |
 | `/docs` | In-app HTTP notes |
-| `/admin` | Admin overview dashboard |
+| `/admin` | Admin overview + Postgres runtime Config editor |
 | `/signin`, `/signup` | Auth |
 | `/me`, `/me/tokens`, `/me/preferences`, `/me/security` | Account |

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mewisme/discloud-go/internal/auth"
@@ -68,6 +69,11 @@ type Store interface {
 	TouchAPITokenLastUsed(ctx context.Context, id string, now time.Time) error
 	CountAPITokensByUser(ctx context.Context, userID string) (int64, error)
 	AdminOverview(ctx context.Context, since time.Time) (store.AdminOverview, error)
+	ListConfig(ctx context.Context) ([]store.ConfigEntry, error)
+	GetConfig(ctx context.Context, key string) (store.ConfigEntry, error)
+	SetConfig(ctx context.Context, key, value string) error
+	DeleteConfig(ctx context.Context, key string) error
+	SetConfigBatch(ctx context.Context, entries map[string]string) error
 	Ping(ctx context.Context) error
 }
 
@@ -92,6 +98,17 @@ type Options struct {
 	TrustProxy bool
 	Keys       auth.Keys
 	Now        func() time.Time // nil → time.Now
+
+	// ChunkSize is the effective upload chunk size. Zero → defaultChunkSize (8 MiB).
+	ChunkSize int64
+	// GuildID is the Discord guild used for PremiumTier checks (optional).
+	GuildID string
+	// PreferredChunkSize is the configured preferred size before tier resolve.
+	PreferredChunkSize int64
+	// EnvPublic is DISCLOUD_* defaults for allowlisted public keys (Postgres merge).
+	EnvPublic map[string]string
+	// UseDBConfig enables env+DB merge for public settings (Postgres).
+	UseDBConfig bool
 
 	RateLimitUploadPerMin   int
 	RateLimitDownloadPerMin int
@@ -118,12 +135,22 @@ type Server struct {
 	// bounds hung connects; no Client.Timeout so slow body reads continue.
 	cdn *http.Client
 
+	cfgMu              sync.RWMutex
+	chunkSize          int64
+	guildID            string
+	preferredChunkSize int64
+	useDBConfig        bool
+	envPublic          map[string]string // allowlisted env defaults
+	dbSources          map[string]string // key → "db"|"env" for admin GET (optional cache)
+	dbUpdated          map[string]string
+
 	rateLimitUploadPerMin   int
 	rateLimitDownloadPerMin int
 	maxUserBytes            int64
 	maxAnonUploadsPerDay    int
 	maxAnonBytesPerDay      int64
 	maxRawUploadBytes       int64
+	maxRawUploadConfigured  int64 // 0 means derive from chunkSize
 	captchaSecret           string
 
 	// captchaVerify is set in tests; nil → Turnstile siteverify.
@@ -135,9 +162,14 @@ func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, opts Options)
 	if now == nil {
 		now = time.Now
 	}
-	maxRaw := opts.MaxRawUploadBytes
+	cs := opts.ChunkSize
+	if cs <= 0 {
+		cs = defaultChunkSize
+	}
+	maxRawConfigured := opts.MaxRawUploadBytes
+	maxRaw := maxRawConfigured
 	if maxRaw <= 0 {
-		maxRaw = int64(maxChunksPerFile) * chunkSize
+		maxRaw = int64(maxChunksPerFile) * cs
 	}
 	return &Server{
 		log:                     log,
@@ -151,12 +183,18 @@ func New(log *slog.Logger, st Store, ca Cache, dc *discord.Client, opts Options)
 		trustProxy:              opts.TrustProxy,
 		keys:                    opts.Keys,
 		now:                     now,
+		chunkSize:               cs,
+		guildID:                 strings.TrimSpace(opts.GuildID),
+		preferredChunkSize:      opts.PreferredChunkSize,
+		useDBConfig:             opts.UseDBConfig,
+		envPublic:               opts.EnvPublic,
 		rateLimitUploadPerMin:   opts.RateLimitUploadPerMin,
 		rateLimitDownloadPerMin: opts.RateLimitDownloadPerMin,
 		maxUserBytes:            opts.MaxUserBytes,
 		maxAnonUploadsPerDay:    opts.MaxAnonUploadsPerDay,
 		maxAnonBytesPerDay:      opts.MaxAnonBytesPerDay,
 		maxRawUploadBytes:       maxRaw,
+		maxRawUploadConfigured:  maxRawConfigured,
 		captchaSecret:           opts.CaptchaSecret,
 		cdn: &http.Client{
 			Transport: &http.Transport{
@@ -197,6 +235,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/{id}/access-token/rotate", s.handleRotateToken)
 	mux.HandleFunc("DELETE /api/files/{id}", s.handleDeleteFile)
 	mux.HandleFunc("GET /api/admin/overview", s.handleAdminOverview)
+	mux.HandleFunc("GET /api/admin/config", s.handleAdminGetConfig)
+	mux.HandleFunc("PUT /api/admin/config", s.handleAdminPutConfig)
+	mux.HandleFunc("DELETE /api/admin/config/{key}", s.handleAdminDeleteConfig)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /f/{id}", s.handleDownload)
 	mux.HandleFunc("GET /f/{id}/{name...}", s.handleDownload)
@@ -227,11 +268,12 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 // handleInfo is public upload sizing only — never expose bot/worker counts.
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	cs := s.effectiveChunkSize()
 	info := map[string]any{
-		"chunkSize": chunkSize,
+		"chunkSize": cs,
 		"uploads": map[string]any{
 			"sessions":    true,
-			"maxFileSize": int64(maxChunksPerFile) * chunkSize,
+			"maxFileSize": int64(maxChunksPerFile) * cs,
 		},
 	}
 	if s.captchaEnabled() {

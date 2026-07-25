@@ -2,16 +2,18 @@
 
 [![CI](https://github.com/mewisme/discloud-go/actions/workflows/ci.yml/badge.svg)](https://github.com/mewisme/discloud-go/actions/workflows/ci.yml) [![Release](https://github.com/mewisme/discloud-go/actions/workflows/release.yml/badge.svg)](https://github.com/mewisme/discloud-go/actions/workflows/release.yml) [![Go](https://img.shields.io/github/go-mod/go-version/mewisme/discloud-go?logo=go)](go.mod) [![Latest release](https://img.shields.io/github/v/release/mewisme/discloud-go?logo=github)](https://github.com/mewisme/discloud-go/releases/latest) [![GHCR](https://img.shields.io/badge/ghcr.io-discloud%20%2F%20discloud--web-blue?logo=docker)](https://github.com/mewisme/discloud-go/pkgs/container/discloud) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Self-hosted file host that stores files as Discord attachments (fixed **8 MiB** chunks), with a **Postgres** index, **Valkey** for CDN URL cache and rate/quota counters, a **Go API**, a **Next.js** UI, and a **`discloud` CLI**. The CLI also supports **self-managed** mode: upload/download straight to Discord with portable `.discloud` bundles (no API required for transfer).
+Self-hosted file host that stores files as Discord attachments, with a **Postgres** (or local **SQLite**) index, **Valkey** (or in-memory) cache, a **Go API**, a **Next.js** UI, and a **`discloud` CLI**. Chunk size defaults to **8 MiB**; with a Discord **guild ID** the API sizes chunks from the guild **Premium Tier** (same rules as self-managed CLI). The CLI also supports **self-managed** mode: upload/download straight to Discord with portable `.discloud` bundles (no API required for transfer).
 
 ## Features
 
 - Content-addressed chunks and resumable upload sessions (web IndexedDB + CLI checkpoints)
-- **Self-managed** CLI mode: multi-file `.discloud` bundles, password or obfuscated protection, guild-tier chunk sizing, identity checks on download
+- Guild-tier chunk sizing for the API (env / `server.yaml` / Postgres admin config) and for self-managed CLI
+- **Self-managed** CLI mode: multi-file `.discloud` bundles, password or obfuscated protection, identity checks on download
 - Interactive CLI pickers (`upload pick` / `get pick`), progress bars, folder walk with `--depth`
 - CLI **customize**: progress-bar gradients + longHue, huh prompt themes, left/center align (banner + tables)
 - Public/private files, password shares, download limits, access-token rotation (server-managed)
 - Cookie sessions and personal API tokens (`dc_…`); first user on a fresh DB is `admin`
+- Postgres runtime `config` table + Admin UI (Docker); local installs use `server.yaml`
 - Compose stack: API + web + Postgres 18 + Valkey 8
 - CLI via API `/install.sh` · `/install.ps1`, [get.mewis.me](https://get.mewis.me/discloud.sh), Scoop, or Homebrew
 
@@ -29,16 +31,17 @@ flowchart LR
   cliSelf --> cdn
 ```
 
-DisCloud uses fixed 8 MiB chunks for broad compatibility with Discord attachment uploads (max 8192 chunks ≈ 64 GiB per file). Self-managed mode sizes chunks from the guild premium tier instead. Details: [docs/architecture.md](docs/architecture.md).
+Default chunk size is **8 MiB** (no guild). With `DISCLOUD_GUILD_ID` (or local `guildId` / admin `guild_id`), the API resolves Discord Premium Tier and uses up to 10 / 50 / 100 MiB per chunk (max 8192 chunks). Clients read the live size from `GET /api/info`. Details: [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 
-1. Create a Discord bot with **Attach Files** permission and note a channel ID.
+1. Create a Discord bot with **Attach Files** permission and note a channel ID (and optionally the guild ID for larger chunks).
 2. Configure env:
 
 ```bash
 cp .env.example .env
 # set DISCLOUD_BOT_TOKEN, DISCLOUD_CHANNEL_ID, DISCLOUD_CORS
+# optional: DISCLOUD_GUILD_ID, DISCLOUD_CHUNK_SIZE
 ```
 
 3. Start the stack:
@@ -100,11 +103,11 @@ discloud server status
 discloud server stop
 ```
 
-Config lives under `…/server/config/` (survives updates). Data (`discloud.db`, secrets, logs) is under the user data directory. See [docs/cli.md](docs/cli.md#local-server) and [docs/configuration.md](docs/configuration.md#local-server).
+Config lives under `…/server/config/` (survives updates): `server.yaml` holds `botTokens`, `channelId`, optional `guildId` / `chunkSize` / `premiumTier` (self-upload shape). Data (`discloud.db`, secrets, logs) is under the user data directory. See [docs/cli.md](docs/cli.md#local-server) and [docs/configuration.md](docs/configuration.md#local-server).
 
 ## Basic usage
 
-Web: open http://localhost:3000 — upload files or folders, manage visibility, copy share links. Account at `/me`; inspect at `/i/<file-id>`; admin at `/admin`.
+Web: open http://localhost:3000 — upload files or folders, manage visibility, copy share links. Account at `/me`; inspect at `/i/<file-id>`; admin at `/admin` (overview + Postgres **Config** editor).
 
 **Server-managed:**
 
@@ -135,7 +138,7 @@ discloud config set customize --prompt-theme charm --align left
 discloud config set customize --upload-colors '#3f51b1,#f18271,#f7c978' --upload-long-hue
 ```
 
-Whole-file digests use **discloud-sha256-v1** (equals `sha256sum` only for single-chunk files ≤ 8 MiB). See [docs/file-integrity.md](docs/file-integrity.md).
+Whole-file digests use **discloud-sha256-v1** (equals `sha256sum` only for single-chunk files — typically ≤ the file’s stored chunk size). See [docs/file-integrity.md](docs/file-integrity.md).
 
 ## Operational notes
 

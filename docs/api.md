@@ -24,6 +24,7 @@ Base URL defaults to `http://localhost:6373` (or your public `DISCLOUD_API_URL`)
 ```bash
 curl -s https://api.example.com/api/info
 # {"chunkSize":8388608,"uploads":{"sessions":true,"maxFileSize":68719476736}}
+# chunkSize is the live effective size (8 MiB without guild; tier max / preferred when guild set)
 ```
 
 ## Auth routes
@@ -85,11 +86,27 @@ Resume auth: `X-Upload-Token` or `?token=`.
 
 ## Admin
 
-| Method | Path |
-| --- | --- |
-| `GET` | `/api/admin/overview` | Storage, users, uploads, traffic, bot count, Postgres/Valkey health |
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/overview` | Storage, users, uploads, traffic, bot count, DB/cache health |
+| `GET` | `/api/admin/config` | Merged allowlisted public config (`source`: `env` \| `db`) — **Postgres only** |
+| `PUT` | `/api/admin/config` | Body `{ "entries": { "guild_id": "…", … } }` — upsert DB pins; re-resolves chunk size |
+| `DELETE` | `/api/admin/config/{key}` | Remove DB pin → fall back to env |
 
-Requires admin role (cookie) or PAT with `admin` scope plus admin role.
+Requires admin role (cookie) or PAT with `admin` scope plus admin role. On SQLite, config routes return **501**.
+
+```bash
+curl -s -H "Origin: http://localhost:3000" -b cookies.txt \
+  https://api.example.com/api/admin/config
+# {"entries":[{"key":"guild_id","value":"","source":"env"}, …]}
+
+curl -X PUT -H "Origin: http://localhost:3000" -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -d '{"entries":{"guild_id":"123","chunk_size":"0"}}' \
+  https://api.example.com/api/admin/config
+```
+
+Allowlisted keys: `guild_id`, `chunk_size`, `max_raw_upload`, `rl_upload`, `rl_download`, `max_user_bytes`, `max_anon_uploads`, `max_anon_bytes`. See [configuration.md](configuration.md#postgres-runtime-config-docker).
 
 ## Downloads and install
 

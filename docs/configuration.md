@@ -28,6 +28,8 @@ Compose injects Postgres + Valkey URLs for containers. Local `discloud server in
 | `DISCLOUD_CONFIG_DIR` | (exe dir / unset) | Directory containing `server.yaml` and `.env` |
 | `DISCLOUD_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 | `DISCLOUD_TRUST_PROXY` | off | Honor `X-Forwarded-For` / `X-Real-IP` only behind an edge that strips client values |
+| `DISCLOUD_GUILD_ID` | empty | Discord guild for PremiumTier chunk sizing. Empty → legacy **8 MiB** |
+| `DISCLOUD_CHUNK_SIZE` | `0` | Preferred chunk size in **bytes**. `0` → Discord max for the guild tier when guild is set; ignored when guild empty |
 | `DISCLOUD_RL_UPLOAD` | `60` | Upload RL per IP (+ per user when signed in). `0` = off |
 | `DISCLOUD_RL_DOWNLOAD` | `120` | Download RL per IP on `/f/{id}`. `0` = off |
 | `DISCLOUD_MAX_USER_BYTES` | `0` | Owned storage cap (bytes). `0` = unlimited |
@@ -37,6 +39,20 @@ Compose injects Postgres + Valkey URLs for containers. Local `discloud server in
 | `DISCLOUD_CAPTCHA_SECRET` | — | Turnstile secret; enables anon upload CAPTCHA when set |
 
 Byte-valued env vars are plain integers (no `GiB` suffix). Empty → default.
+
+### Postgres runtime config (Docker)
+
+On Postgres, allowlisted public settings can be pinned in the `config` table (`key` / `value`). **Env is the default; a DB row wins for that key.** `DELETE` removes the pin so env applies again. Secrets (bot tokens, app secret, DB URL) never go in this table.
+
+| DB key | Env default |
+| --- | --- |
+| `guild_id` | `DISCLOUD_GUILD_ID` |
+| `chunk_size` | `DISCLOUD_CHUNK_SIZE` |
+| `max_raw_upload` | `DISCLOUD_MAX_RAW_UPLOAD` |
+| `rl_upload` / `rl_download` | `DISCLOUD_RL_UPLOAD` / `DISCLOUD_RL_DOWNLOAD` |
+| `max_user_bytes` / `max_anon_uploads` / `max_anon_bytes` | matching `DISCLOUD_MAX_*` |
+
+Admin: `GET` / `PUT` / `DELETE /api/admin/config` (admin role) and the **Config** section on `/admin`. SQLite returns **501**.
 
 ### Backend combinations
 
@@ -59,7 +75,17 @@ process environment > .env > server.yaml > built-in defaults
 
 Merging does not mutate the parent process environment. CLI-managed starts pass absolute `DISCLOUD_CONFIG_DIR` and `DISCLOUD_DATA_DIR`.
 
-Basic YAML keys: `host`, `port`, `botTokens`, `channelId`, `cors`, `apiUrl`, `logLevel`. Advanced: `databaseUrl`, `valkeyUrl` (CLI: `--database-url` / `--valkey-url`). Never print raw bot tokens without `--show-secret`.
+Basic YAML keys: `host`, `port`, `botTokens`, `channelId`, `cors`, `apiUrl`, `logLevel`. Chunk sizing (self-upload shape): optional `guildId`, `chunkSize` (bytes), cached `premiumTier`. Advanced: `databaseUrl`, `valkeyUrl` (CLI: `--database-url` / `--valkey-url`). Never print raw bot tokens without `--show-secret`.
+
+```yaml
+botTokens: ["…"]
+channelId: "…"
+guildId: ""          # empty → 8 MiB chunks
+chunkSize: 0         # preferred bytes; 0 → tier max when guild set
+premiumTier: 0      # updated after a successful tier fetch
+```
+
+Install prompts for an optional guild ID (empty keeps 8 MiB).
 
 Backup recommendation: copy `<dataDir>/discloud.db` (and `-wal`/`-shm` if present) while the server is stopped.
 
@@ -122,8 +148,9 @@ Set via `discloud config set customize` (interactive or flags). Details: [cli.md
 
 | Limit | Value |
 | --- | --- |
-| Chunk size | 8 MiB |
-| Max chunks / file | 8192 (~64 GiB) |
+| Default chunk size (no guild) | 8 MiB |
+| Tier max chunks | 10 / 50 / 100 MiB (tier 0–1 / 2 / 3) |
+| Max chunks / file | 8192 |
 | Anon / authed file retention | 7d / 30d |
 | Download extend | +7d (cap 30d from now) |
 | Upload session TTL | anon 24h / auth 48h |

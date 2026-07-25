@@ -18,7 +18,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import {
   ApiError,
+  deleteAdminConfigKey,
+  fetchAdminConfig,
   fetchAdminOverview,
+  putAdminConfig,
+  type AdminConfigEntry,
   type AdminOverview,
 } from "@/lib/api";
 import {
@@ -28,6 +32,8 @@ import {
   subscribeAuth,
 } from "@/lib/auth";
 import { formatBytes } from "@/lib/format";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
 function StatCard({
   label,
@@ -252,8 +258,158 @@ export function AdminPanel() {
               <DepBadge ok={data.deps.valkey} label="Valkey" />
             </div>
           </section>
+
+          <AdminConfigSection />
         </>
       ) : null}
     </div>
+  );
+}
+
+function AdminConfigSection() {
+  const [entries, setEntries] = useState<AdminConfigEntry[] | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [unsupported, setUnsupported] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAdminConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        setEntries(cfg.entries);
+        const next: Record<string, string> = {};
+        for (const e of cfg.entries) next[e.key] = e.value;
+        setDraft(next);
+        setError(null);
+        setUnsupported(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 501) {
+          setUnsupported(true);
+          return;
+        }
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : "Failed to load config",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (unsupported) return null;
+
+  async function saveAll() {
+    if (!entries) return;
+    setSaving(true);
+    try {
+      const cfg = await putAdminConfig(draft);
+      setEntries(cfg.entries);
+      const next: Record<string, string> = {};
+      for (const e of cfg.entries) next[e.key] = e.value;
+      setDraft(next);
+      toast.success("Config saved");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Save failed",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetKey(key: string) {
+    setSaving(true);
+    try {
+      const cfg = await deleteAdminConfigKey(key);
+      setEntries(cfg.entries);
+      const next: Record<string, string> = {};
+      for (const e of cfg.entries) next[e.key] = e.value;
+      setDraft(next);
+      toast.success(`Reset ${key} to env`);
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Reset failed",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-medium">Config</h2>
+          <p className="text-xs text-muted-foreground">
+            Env defaults; DB rows override. Reset removes the DB pin.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          disabled={saving || !entries}
+          onClick={() => void saveAll()}
+        >
+          {saving ? <Spinner data-icon="inline-start" /> : null}
+          Save
+        </Button>
+      </div>
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTitle>Could not load config</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {!entries && !error ? (
+        <Skeleton className="h-40 w-full" />
+      ) : null}
+      {entries ? (
+        <div className="flex flex-col gap-2">
+          {entries.map((e) => (
+            <div
+              key={e.key}
+              className="grid gap-2 sm:grid-cols-[10rem_1fr_auto_auto] sm:items-center"
+            >
+              <div className="text-sm font-medium tabular-nums">{e.key}</div>
+              <Input
+                value={draft[e.key] ?? ""}
+                onChange={(ev) =>
+                  setDraft((d) => ({ ...d, [e.key]: ev.target.value }))
+                }
+                className="font-mono text-sm"
+              />
+              <Badge variant={e.source === "db" ? "default" : "secondary"}>
+                {e.source}
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={saving || e.source !== "db"}
+                onClick={() => void resetKey(e.key)}
+              >
+                Reset
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }

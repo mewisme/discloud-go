@@ -46,7 +46,7 @@ func TestFileSHA256TwoChunksGolden(t *testing.T) {
 
 func TestFileSHA256FromReaderMatchesSplit(t *testing.T) {
 	payload := bytes.Repeat([]byte("x"), 100)
-	fromReader, err := FileSHA256FromReader(bytes.NewReader(payload))
+	fromReader, err := FileSHA256FromReader(bytes.NewReader(payload), DefaultChunkSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,25 +58,32 @@ func TestFileSHA256FromReaderMatchesSplit(t *testing.T) {
 }
 
 func TestFileSHA256FromReaderMultiChunk(t *testing.T) {
-	// Two full tiny chunks via a custom reader size — use ChunkSize+1 bytes.
-	payload := bytes.Repeat([]byte("a"), ChunkSize+1)
-	got, err := FileSHA256FromReader(bytes.NewReader(payload))
+	const size = 64
+	payload := bytes.Repeat([]byte("a"), size+1)
+	got, err := FileSHA256FromReader(bytes.NewReader(payload), size)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c1 := payload[:ChunkSize]
-	c2 := payload[ChunkSize:]
+	c1 := payload[:size]
+	c2 := payload[size:]
 	h1 := sha256.Sum256(c1)
 	h2 := sha256.Sum256(c2)
 	want, err := FileSHA256(
 		[]string{hex.EncodeToString(h1[:]), hex.EncodeToString(h2[:])},
-		[]int64{int64(ChunkSize), 1},
+		[]int64{int64(size), 1},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
 		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
+func TestFileSHA256FromReaderRejectsBadSize(t *testing.T) {
+	_, err := FileSHA256FromReader(bytes.NewReader([]byte("x")), 0)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 

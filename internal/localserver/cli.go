@@ -16,6 +16,8 @@ type InstallOptions struct {
 	Yes       bool
 	BotTokens []string
 	ChannelID string
+	GuildID   string
+	ChunkSize int64
 	CORS      string
 }
 
@@ -120,7 +122,7 @@ func UninstallCLI(ctx context.Context, opts UninstallOptions) (CLIInstallResult,
 }
 
 func applyInstallSecrets(p Paths, opts InstallOptions) error {
-	if len(opts.BotTokens) == 0 && opts.ChannelID == "" && opts.CORS == "" {
+	if len(opts.BotTokens) == 0 && opts.ChannelID == "" && opts.GuildID == "" && opts.ChunkSize == 0 && opts.CORS == "" {
 		return nil
 	}
 	f, err := serverconfig.Load(p.InstallDir)
@@ -132,6 +134,12 @@ func applyInstallSecrets(p Paths, opts InstallOptions) error {
 	}
 	if opts.ChannelID != "" {
 		f.ChannelID = opts.ChannelID
+	}
+	if opts.GuildID != "" {
+		f.GuildID = opts.GuildID
+	}
+	if opts.ChunkSize > 0 {
+		f.ChunkSize = opts.ChunkSize
 	}
 	if opts.CORS != "" {
 		f.CORS = opts.CORS

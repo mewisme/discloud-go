@@ -16,3 +16,7 @@ var ErrUploadNotActive = errors.New("upload session not active")
 
 // ErrDownloadLimit is returned when a share download cap is exhausted.
 var ErrDownloadLimit = errors.New("download limit reached")
+
+// ErrNotSupported is returned when a backend does not implement a feature
+// (e.g. SQLite has no runtime config table).
+var ErrNotSupported = errors.New("not supported")
