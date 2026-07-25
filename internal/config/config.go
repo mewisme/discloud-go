@@ -64,7 +64,7 @@ type Config struct {
 // this returns without error.
 func Load() (Config, error) {
 	c := Config{
-		Port:             getenv("DISCLOUD_PORT", "8080"),
+		Port:             getenv("DISCLOUD_PORT", "6373"),
 		DatabaseURL:      strings.TrimSpace(os.Getenv("DISCLOUD_DATABASE_URL")),
 		ValkeyURL:        strings.TrimSpace(os.Getenv("DISCLOUD_VALKEY_URL")),
 		DiscordBotToken:  strings.TrimSpace(os.Getenv("DISCLOUD_BOT_TOKEN")),

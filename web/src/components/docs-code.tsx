@@ -11,8 +11,8 @@ function subscribe() {
 function useApiBase(): string {
   return useSyncExternalStore(
     subscribe,
-    () => apiURL("").replace(/\/$/, "") || "http://localhost:8080",
-    () => "http://localhost:8080",
+    () => apiURL("").replace(/\/$/, "") || "http://localhost:6373",
+    () => "http://localhost:6373",
   );
 }
 

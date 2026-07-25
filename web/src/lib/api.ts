@@ -163,7 +163,7 @@ export function apiURL(path: string): string {
     typeof globalThis !== "undefined"
       ? (globalThis as { __DISCLOUD_API__?: string }).__DISCLOUD_API__
       : undefined;
-  const base = (injected || "http://localhost:8080").replace(/\/$/, "");
+  const base = (injected || "http://localhost:6373").replace(/\/$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }

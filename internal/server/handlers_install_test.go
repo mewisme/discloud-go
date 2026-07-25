@@ -55,11 +55,11 @@ func TestInstallScriptsBakeEnv(t *testing.T) {
 func TestInstallScriptUsesRequestHostWhenNoAPIURL(t *testing.T) {
 	srv := &Server{webOrigin: "http://localhost:3000"}
 	req := httptest.NewRequest(http.MethodGet, "/install.sh", nil)
-	req.Host = "api.local:8080"
+	req.Host = "api.local:6373"
 	rec := httptest.NewRecorder()
 	srv.handleInstallSH(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `DEFAULT_DISCLOUD_BASE="http://api.local:8080"`) {
+	if !strings.Contains(body, `DEFAULT_DISCLOUD_BASE="http://api.local:6373"`) {
 		t.Fatalf("want host-derived base, got:\n%s", body)
 	}
 }

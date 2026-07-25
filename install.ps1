@@ -6,14 +6,14 @@
 # Environment:
 #   DISCLOUD_VERSION      release tag (default: latest)
 #   DISCLOUD_INSTALL_DIR  install location (default: %LOCALAPPDATA%\discloud)
-#   DISCLOUD_BASE         API origin (default: http://localhost:8080)
+#   DISCLOUD_BASE         API origin (default: http://localhost:6373)
 #   DISCLOUD_ORIGIN       web origin / CORS (default: http://localhost:3000)
 
 $ErrorActionPreference = 'Stop'
 $repo = 'mewisme/discloud-go'
 $installDir = if ($env:DISCLOUD_INSTALL_DIR) { $env:DISCLOUD_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'discloud' }
 
-$DefaultBase = 'http://localhost:8080'
+$DefaultBase = 'http://localhost:6373'
 $DefaultOrigin = 'http://localhost:3000'
 
 $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {

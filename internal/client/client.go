@@ -19,7 +19,7 @@ import (
 const sessionCookie = "discloud_session"
 
 type Config struct {
-	BaseURL    string // API origin, e.g. http://localhost:8080
+	BaseURL    string // API origin, e.g. http://localhost:6373
 	Origin     string // must match server DISCLOUD_CORS for CSRF, e.g. http://localhost:3000
 	CookiePath string // cookie jar file; empty → default path
 	Token      string // personal access token (Bearer); env DISCLOUD_TOKEN / config.yaml
@@ -36,7 +36,7 @@ func DefaultConfig() Config {
 	envOrigin := os.Getenv("DISCLOUD_ORIGIN")
 	envToken := os.Getenv("DISCLOUD_TOKEN")
 	fileBase, fileOrigin, fileToken := loadConfigFile()
-	base := firstNonEmpty(envBase, fileBase, "http://localhost:8080")
+	base := firstNonEmpty(envBase, fileBase, "http://localhost:6373")
 	origin := firstNonEmpty(envOrigin, fileOrigin, "http://localhost:3000")
 	token := firstNonEmpty(envToken, fileToken)
 	return Config{
@@ -98,7 +98,7 @@ type Client struct {
 // New builds a client and loads any persisted session cookies.
 func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "http://localhost:8080"
+		cfg.BaseURL = "http://localhost:6373"
 	}
 	if cfg.Origin == "" {
 		cfg.Origin = "http://localhost:3000"

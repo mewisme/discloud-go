@@ -50,7 +50,7 @@ docker compose up -d
 | | |
 | --- | --- |
 | UI | http://localhost:3000 |
-| API | http://localhost:8080 |
+| API | http://localhost:6373 |
 | Docs | http://localhost:3000/docs |
 
 Images: `ghcr.io/mewisme/discloud` and `ghcr.io/mewisme/discloud-web` (`DISCLOUD_TAG`, default `latest`).
@@ -85,7 +85,7 @@ brew install --cask discloud-cli
 go build -o discloud-cli ./cmd/discloud-cli
 ```
 
-Install scripts default `base`/`origin` to `http://localhost:8080` and `http://localhost:3000` (override with `DISCLOUD_BASE` / `DISCLOUD_ORIGIN`).
+Install scripts default `base`/`origin` to `http://localhost:6373` and `http://localhost:3000` (override with `DISCLOUD_BASE` / `DISCLOUD_ORIGIN`).
 
 The released command is `discloud`. The API container entrypoint is `/discloud`. Full command tree and shell completion: [docs/cli.md](docs/cli.md).
 
@@ -96,7 +96,7 @@ Web: open http://localhost:3000 — upload files or folders, manage visibility, 
 **Server-managed:**
 
 ```bash
-discloud config set --base http://localhost:8080 --origin http://localhost:3000
+discloud config set --base http://localhost:6373 --origin http://localhost:3000
 discloud auth login
 discloud upload ./file.bin
 discloud files list

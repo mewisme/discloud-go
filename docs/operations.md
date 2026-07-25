@@ -6,7 +6,7 @@ Default pull-and-run stack: [`docker-compose.yml`](../docker-compose.yml).
 
 | Service | Image | Ports | Notes |
 | --- | --- | --- | --- |
-| `api` | `ghcr.io/mewisme/discloud:${DISCLOUD_TAG:-latest}` | `8080` | Depends on healthy Postgres + Valkey |
+| `api` | `ghcr.io/mewisme/discloud:${DISCLOUD_TAG:-latest}` | `6373` | Depends on healthy Postgres + Valkey |
 | `web` | `ghcr.io/mewisme/discloud-web:${DISCLOUD_TAG:-latest}` | `3000` | `mem_limit: 256m` |
 | `postgres` | `postgres:18-alpine` | internal | Volume `discloud-pgdata` |
 | `valkey` | `valkey/valkey:8-alpine` | internal | No AOF/RDB (`--save "" --appendonly no`) |
@@ -78,10 +78,10 @@ Example (conceptual nginx snippet):
 
 ```nginx
 # UI → Next.js (web:3000)
-# API paths → Go API (api:8080)
+# API paths → Go API (api:6373)
 
 location /api/ {
-  proxy_pass http://api:8080;
+  proxy_pass http://api:6373;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto $scheme;
   proxy_set_header X-Real-IP $remote_addr;
@@ -89,18 +89,18 @@ location /api/ {
 }
 
 location /f/ {
-  proxy_pass http://api:8080;
+  proxy_pass http://api:6373;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto $scheme;
   proxy_set_header X-Real-IP $remote_addr;
 }
 
 location ~ ^/install\.(sh|ps1)$ {
-  proxy_pass http://api:8080;
+  proxy_pass http://api:6373;
 }
 
 location /readyz {
-  proxy_pass http://api:8080;
+  proxy_pass http://api:6373;
 }
 ```
 

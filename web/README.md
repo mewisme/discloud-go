@@ -21,14 +21,14 @@ Uploads need a **secure context** (`https` or `localhost`) for `crypto.subtle`.
 From the **repo root** (API must be reachable):
 
 ```bash
-# terminal 1 — full stack, or at least the API on :8080
+# terminal 1 — full stack, or at least the API on :6373
 docker compose up -d
 # or: make run  (needs Discord + DISCLOUD_DATABASE_URL + DISCLOUD_VALKEY_URL + DISCLOUD_CORS)
 
 # terminal 2 — this app
 cd web
 pnpm install
-echo 'DISCLOUD_API_URL=http://localhost:8080' > .env.local
+echo 'DISCLOUD_API_URL=http://localhost:6373' > .env.local
 pnpm dev
 ```
 
@@ -38,11 +38,11 @@ Open http://localhost:3000. Server `DISCLOUD_CORS` must be exactly `http://local
 
 | Variable | Where | Default | Role |
 | --- | --- | --- | --- |
-| `DISCLOUD_API_URL` | Server (layout) | `http://localhost:8080` | Browser-facing API origin; injected as `self.__DISCLOUD_API__` |
+| `DISCLOUD_API_URL` | Server (layout) | `http://localhost:6373` | Browser-facing API origin; injected as `self.__DISCLOUD_API__` |
 | `DISCLOUD_API_UPSTREAM` | Server (install routes) | `DISCLOUD_API_URL`, then localhost | Docker-internal API for `/install.sh` / `/install.ps1` |
 | `PORT` / `HOSTNAME` | Docker image | `3000` / `0.0.0.0` | Standalone Node server |
 
-Compose sets `DISCLOUD_API_URL` (public) and `DISCLOUD_API_UPSTREAM=http://api:8080`. Locally, only `DISCLOUD_API_URL` in `web/.env.local` is usually enough.
+Compose sets `DISCLOUD_API_URL` (public) and `DISCLOUD_API_UPSTREAM=http://api:6373`. Locally, only `DISCLOUD_API_URL` in `web/.env.local` is usually enough.
 
 The browser talks to `DISCLOUD_API_URL` with `credentials: "include"`. Cross-origin setups need the API `DISCLOUD_CORS` to match this UI’s origin.
 

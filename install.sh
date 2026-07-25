@@ -11,7 +11,7 @@
 #   DISCLOUD_VERSION      release tag (default: latest)
 #   DISCLOUD_INSTALL_DIR  bundle location (default: ~/.discloud)
 #   DISCLOUD_BIN_DIR      symlink location (default: ~/.local/bin)
-#   DISCLOUD_BASE         API origin (default: http://localhost:8080)
+#   DISCLOUD_BASE         API origin (default: http://localhost:6373)
 #   DISCLOUD_ORIGIN       web origin / CORS (default: http://localhost:3000)
 set -eu
 
@@ -19,7 +19,7 @@ REPO="mewisme/discloud-go"
 INSTALL_DIR="${DISCLOUD_INSTALL_DIR:-$HOME/.discloud}"
 BIN_DIR="${DISCLOUD_BIN_DIR:-$HOME/.local/bin}"
 
-DEFAULT_DISCLOUD_BASE="http://localhost:8080"
+DEFAULT_DISCLOUD_BASE="http://localhost:6373"
 DEFAULT_DISCLOUD_ORIGIN="http://localhost:3000"
 
 if [ "${1:-}" = "--uninstall" ]; then

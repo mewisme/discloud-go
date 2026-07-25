@@ -9,6 +9,8 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -35,7 +37,16 @@ builds:
       - -s -w -X main.version={{ .Version }}
 
 archives:
-  # Release artifact: CLI only. Server binary stays in builds for dockers_v2.
+  - id: discloud
+    ids: [discloud]
+    formats: [tar.gz]
+    name_template: "discloud_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+    format_overrides:
+      - goos: windows
+        formats: [zip]
   - id: discloud-cli
     ids: [discloud-cli]
     formats: [tar.gz]

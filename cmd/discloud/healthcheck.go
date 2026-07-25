@@ -12,7 +12,7 @@ import (
 func runHealthcheck() error {
 	port := os.Getenv("DISCLOUD_PORT")
 	if port == "" {
-		port = "8080"
+		port = "6373"
 	}
 	url := "http://127.0.0.1:" + port + "/readyz"
 

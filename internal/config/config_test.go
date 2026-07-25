@@ -97,7 +97,7 @@ func TestLoadRejectsInvalidEnv(t *testing.T) {
 	if _, err := Load(); err == nil || !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expected ErrInvalid for port, got %v", err)
 	}
-	t.Setenv("DISCLOUD_PORT", "8080")
+	t.Setenv("DISCLOUD_PORT", "6373")
 
 	t.Setenv("DISCLOUD_DATABASE_URL", "mysql://localhost/db")
 	if _, err := Load(); err == nil {

@@ -1,6 +1,6 @@
 # API
 
-Base URL defaults to `http://localhost:8080` (or your public `DISCLOUD_API_URL`). The in-app UI also hosts HTTP notes at `/docs`.
+Base URL defaults to `http://localhost:6373` (or your public `DISCLOUD_API_URL`). The in-app UI also hosts HTTP notes at `/docs`.
 
 ## Authentication
 

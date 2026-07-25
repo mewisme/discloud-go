@@ -20,7 +20,7 @@ Compose injects `DISCLOUD_DATABASE_URL` and `DISCLOUD_VALKEY_URL` for containers
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DISCLOUD_PORT` | `8080` | Listen port |
+| `DISCLOUD_PORT` | `6373` | Listen port |
 | `DISCLOUD_API_URL` | (derive from request) | Public API origin for share links; **not** the UI URL |
 | `DISCLOUD_APP_SECRET` | auto `.app.secret` | HMAC root (≥32 chars). Env wins over file. Docker: `/data/.app.secret` |
 | `DISCLOUD_TRUST_PROXY` | off | Honor `X-Forwarded-For` / `X-Real-IP` only behind an edge that strips client values |
@@ -40,8 +40,8 @@ Byte-valued env vars are plain integers (no `GiB` suffix). Empty → default.
 | --- | --- | --- |
 | `DISCLOUD_TAG` | `latest` | GHCR image tag for `api` and `web` |
 | `POSTGRES_PASSWORD` | `discloud` | Postgres password |
-| `DISCLOUD_API_URL` | `http://localhost:8080` | Browser-facing API origin (web + API share links) |
-| `DISCLOUD_API_UPSTREAM` | `http://api:8080` (compose) | Server-side proxy target for `/install.sh` and `/install.ps1` |
+| `DISCLOUD_API_URL` | `http://localhost:6373` | Browser-facing API origin (web + API share links) |
+| `DISCLOUD_API_UPSTREAM` | `http://api:6373` (compose) | Server-side proxy target for `/install.sh` and `/install.ps1` |
 | `DISCLOUD_CAPTCHA_KEY` | — | Turnstile site key for the web UI (`GET /api/captcha` on the Next.js app) |
 
 `DISCLOUD_API_URL` must be reachable from the browser. `DISCLOUD_API_UPSTREAM` is Docker-internal and used only by the web container to fetch install scripts.
@@ -60,7 +60,7 @@ docker compose up -d --force-recreate api web
 | `DISCLOUD_ORIGIN` | Must match server `DISCLOUD_CORS` (CSRF) when using cookie login |
 | `DISCLOUD_TOKEN` | Personal access token (`dc_…`). Used only when the session cookie jar is empty |
 
-Resolution order: env → `config.yaml` → `http://localhost:8080` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. Session cookie jar wins over `DISCLOUD_TOKEN`. Legacy `config.json` migrates automatically to `config.yaml`. See [cli.md](cli.md).
+Resolution order: env → `config.yaml` → `http://localhost:6373` / `http://localhost:3000`. Flags `--base` / `--origin` override after load. Session cookie jar wins over `DISCLOUD_TOKEN`. Legacy `config.json` migrates automatically to `config.yaml`. See [cli.md](cli.md).
 
 ### Self-upload (`selfUpload` in `config.yaml`)
 

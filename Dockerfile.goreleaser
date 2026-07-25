@@ -6,5 +6,5 @@ COPY $TARGETPLATFORM/discloud /discloud
 COPY --chown=65532:65532 data /data
 WORKDIR /data
 USER nonroot
-EXPOSE 8080
+EXPOSE 6373
 ENTRYPOINT ["/discloud"]

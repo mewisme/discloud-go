@@ -18,7 +18,7 @@ curl -fsSL https://get.mewis.me/discloud.sh | sh       # macOS / Linux
 irm https://get.mewis.me/discloud.ps1 | iex            # Windows
 ```
 
-Root-repo scripts (`install.sh` / `install.ps1`) default `base`/`origin` to `http://localhost:8080` and `http://localhost:3000` (override with `DISCLOUD_BASE` / `DISCLOUD_ORIGIN`).
+Root-repo scripts (`install.sh` / `install.ps1`) default `base`/`origin` to `http://localhost:6373` and `http://localhost:3000` (override with `DISCLOUD_BASE` / `DISCLOUD_ORIGIN`).
 
 Package managers / from source:
 
@@ -157,7 +157,7 @@ Every command and flag below. Replace placeholders (`<id>`, paths, hosts) with r
 ### Global
 
 ```bash
-discloud --base http://localhost:8080 --origin http://localhost:3000 auth me
+discloud --base http://localhost:6373 --origin http://localhost:3000 auth me
 discloud --json auth me
 discloud -v
 discloud version
@@ -171,7 +171,7 @@ discloud config
 discloud config get
 discloud config path
 discloud config --json
-discloud config set --base http://localhost:8080 --origin http://localhost:3000
+discloud config set --base http://localhost:6373 --origin http://localhost:3000
 discloud config set --token                    # prompts for PAT (not passed on argv)
 discloud config set token                      # same as --token
 discloud config set --clear-token

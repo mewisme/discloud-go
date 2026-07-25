@@ -3,7 +3,7 @@ export function apiUpstream(): string {
   return (
     process.env.DISCLOUD_API_UPSTREAM ||
     process.env.DISCLOUD_API_URL ||
-    "http://localhost:8080"
+    "http://localhost:6373"
   ).replace(/\/$/, "");
 }
 
